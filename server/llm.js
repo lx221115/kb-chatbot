@@ -1,4 +1,5 @@
 import { db } from './db.js';
+import { logger } from './logger.js';
 
 const ENV_FALLBACK = {
   provider: 'openai',
@@ -22,14 +23,18 @@ export function getLlmConfig(userId) {
   return ENV_FALLBACK.apiKey ? ENV_FALLBACK : { ...ENV_FALLBACK, apiKey: '' };
 }
 
-export function saveLlmConfig(userId, { provider, baseUrl, apiKey, model }) {
+export function saveLlmConfig(userId, { provider, baseUrl, apiKey, model } = {}) {
   const allowed = ['openai', 'anthropic'];
   const p = allowed.includes(provider) ? provider : 'openai';
+  // 空密钥表示沿用原密钥，避免前端留空保存时误清空
+  const key = (apiKey || '').trim();
+  const finalKey =
+    key || db.prepare('SELECT api_key FROM user_settings WHERE user_id=?').get(userId)?.api_key || '';
   db.prepare(
     `INSERT INTO user_settings(user_id, provider, base_url, api_key, model) VALUES (?,?,?,?,?)
      ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider, base_url=excluded.base_url,
        api_key=excluded.api_key, model=excluded.model`
-  ).run(userId, p, (baseUrl || '').trim(), (apiKey || '').trim(), (model || '').trim());
+  ).run(userId, p, (baseUrl || '').trim(), finalKey, (model || '').trim());
 }
 
 export function llmConfigured(cfg) {
@@ -82,6 +87,16 @@ async function callAnthropic(cfg, messages, { json, temperature }) {
 export async function chatCompletion(messages, opts = {}, cfg = ENV_FALLBACK) {
   if (!llmConfigured(cfg)) throw new Error('未配置模型密钥：请在「设置」中填写，或于服务端 .env 配置 LLM_API_KEY');
   const { json = false, temperature = 0.3 } = opts;
-  if (cfg.provider === 'anthropic') return callAnthropic(cfg, messages, { json, temperature });
-  return callOpenai(cfg, messages, { json, temperature });
+  const started = Date.now();
+  logger.info('llm', 'completion start', { provider: cfg.provider, model: cfg.model, messages: messages.length, json });
+  try {
+    const text = cfg.provider === 'anthropic'
+      ? await callAnthropic(cfg, messages, { json, temperature })
+      : await callOpenai(cfg, messages, { json, temperature });
+    logger.info('llm', 'completion done', { provider: cfg.provider, model: cfg.model, ms: Date.now() - started, chars: text.length });
+    return text;
+  } catch (err) {
+    logger.error('llm', 'completion failed', { provider: cfg.provider, model: cfg.model, ms: Date.now() - started, error: err.message });
+    throw err;
+  }
 }
