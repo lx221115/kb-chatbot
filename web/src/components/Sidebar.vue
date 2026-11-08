@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { getTheme, toggleTheme } from '../theme.js';
 defineProps({
   conversations: { type: Array, default: () => [] },
@@ -9,6 +9,41 @@ defineProps({
 const emit = defineEmits(['new', 'select', 'delete', 'settings', 'logout', 'kb']);
 const theme = ref(getTheme());
 function onToggleTheme() { theme.value = toggleTheme(); }
+
+const now = ref(Date.now());
+let ticker;
+onMounted(() => {
+  ticker = setInterval(() => { now.value = Date.now(); }, 60_000);
+});
+onUnmounted(() => clearInterval(ticker));
+
+function parseTime(value) {
+  if (!value) return null;
+  const d = new Date(String(value).replace(' ', 'T'));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function fullTime(value) {
+  const d = parseTime(value);
+  if (!d) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function timeLabel(value) {
+  const d = parseTime(value);
+  if (!d) return '';
+  const stamp = now.value;
+  const todayStart = new Date(new Date(stamp).setHours(0, 0, 0, 0)).getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const p = (n) => String(n).padStart(2, '0');
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  if (stamp - d.getTime() < 60_000) return '刚刚';
+  if (d.getTime() >= todayStart) return hm;
+  if (d.getTime() >= todayStart - dayMs) return `昨天 ${hm}`;
+  if (d.getFullYear() === new Date(stamp).getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
 </script>
 
 <template>
@@ -33,7 +68,10 @@ function onToggleTheme() { theme.value = toggleTheme(); }
         :class="{ on: c.id === currentId }"
         @click="emit('select', c.id)"
       >
-        <span class="item-title">{{ c.title }}</span>
+        <span class="item-body">
+          <span class="item-title">{{ c.title }}</span>
+          <span class="item-time" :title="fullTime(c.updated_at)">{{ timeLabel(c.updated_at) }}</span>
+        </span>
         <button class="del" title="删除会话" @click.stop="emit('delete', c.id)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
         </button>
@@ -88,7 +126,10 @@ function onToggleTheme() { theme.value = toggleTheme(); }
 }
 .item:hover { background: var(--bg-hover); }
 .item.on { background: var(--bg-active); color: var(--primary-text); font-weight: 600; }
+.item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-time { font-size: 11.5px; font-weight: 400; color: var(--text-faint); line-height: 1.2; }
+.item.on .item-time { color: var(--primary-text); opacity: .72; }
 .del { border: none; background: transparent; color: var(--text-faint); cursor: pointer; padding: 2px; border-radius: 4px; visibility: hidden; }
 .item:hover .del { visibility: visible; }
 .del:hover { color: var(--danger); }
