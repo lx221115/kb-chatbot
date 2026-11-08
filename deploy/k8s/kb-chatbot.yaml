@@ -83,6 +83,9 @@ spec:
               mountPath: /app/data
             - name: logs
               mountPath: /app/logs
+            # 上传文件先落 /tmp 再交给解析 worker，避免占用可写层与持久卷
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /api/health
@@ -99,10 +102,11 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi
             limits:
-              cpu: "1"
-              memory: 1Gi
+              # 100MB 文件的解析峰值：主进程 + 解析 worker（默认 768MB 堆）+ SQLite
+              cpu: "2"
+              memory: 2Gi
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -110,6 +114,9 @@ spec:
         # 日志按天写文件，容器内 emptyDir 即可，用 kubectl logs 采集
         - name: logs
           emptyDir: {}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
 ---
 apiVersion: v1
 kind: Service

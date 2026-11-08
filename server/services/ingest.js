@@ -1,44 +1,27 @@
 import { db } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
+import { splitChunks } from '../lib/chunking.js';
 import { contentTokens } from '../lib/tokenizer.js';
 import { getUsername } from '../lib/userMeta.js';
 
-const CHUNK_SIZE = 400;
-const CHUNK_OVERLAP = 60;
 const MAX_CHUNK_CHARS = 2000;
 
-export function splitChunks(text) {
-  const normalized = text.replace(/\r\n/g, '\n').trim();
-  if (!normalized) return [];
-  const paragraphs = normalized.split(/\n{2,}/);
-  const chunks = [];
-  let buf = '';
-  for (const p of paragraphs) {
-    if (buf && buf.length + p.length + 1 > CHUNK_SIZE) {
-      chunks.push(buf.trim());
-      buf = buf.slice(Math.max(0, buf.length - CHUNK_OVERLAP));
-    }
-    buf = buf ? buf + '\n' + p : p;
-    while (buf.length > CHUNK_SIZE * 2) {
-      chunks.push(buf.slice(0, CHUNK_SIZE).trim());
-      buf = buf.slice(CHUNK_SIZE - CHUNK_OVERLAP);
-    }
-  }
-  if (buf.trim()) chunks.push(buf.trim());
-  return chunks.filter(Boolean);
+// 主线程入库与解析 worker 共用：分块文本 → { text, tokens } 行
+export function toChunkRows(textChunks) {
+  return textChunks.map((text) => ({ text, tokens: contentTokens(text).join(' ') }));
 }
 
 function insertChunks(docId, chunks) {
   const insChunk = db.prepare('INSERT INTO chunks(doc_id, seq, text) VALUES (?,?,?)');
   const insFts = db.prepare('INSERT INTO chunks_fts(chunk_id, tokens) VALUES (?,?)');
-  chunks.forEach((text, i) => {
+  chunks.forEach(({ text, tokens }, i) => {
     const { lastInsertRowid } = insChunk.run(docId, i, text);
-    insFts.run(lastInsertRowid, contentTokens(text).join(' '));
+    insFts.run(lastInsertRowid, tokens);
   });
 }
 
-export function addDocument({ title, sourceType, sourceRef, content, ownerId }) {
-  const chunks = splitChunks(content);
+// chunks 由解析 worker 产出（已分块并分词），主线程只做落库
+export function addDocumentFromChunks({ title, sourceType, sourceRef, chunks, ownerId }) {
   if (!chunks.length) throw new Error('内容为空，无法入库');
   const tx = db.transaction(() => {
     const { lastInsertRowid } = db
@@ -50,6 +33,16 @@ export function addDocument({ title, sourceType, sourceRef, content, ownerId }) 
   const id = tx();
   logger.info('kb', 'document added', { id, ownerId, username: getUsername(ownerId), sourceType, chunks: chunks.length, title: title.slice(0, 60) });
   return { id, title, chunkCount: chunks.length };
+}
+
+export function addDocument({ title, sourceType, sourceRef, content, ownerId }) {
+  return addDocumentFromChunks({
+    title,
+    sourceType,
+    sourceRef,
+    ownerId,
+    chunks: toChunkRows(splitChunks(content))
+  });
 }
 
 export function updateDocument(id, { title, content }, ownerId) {
@@ -75,7 +68,7 @@ export function updateDocument(id, { title, content }, ownerId) {
       (title ?? doc.title).slice(0, 200),
       id
     );
-    insertChunks(id, chunks);
+    insertChunks(id, toChunkRows(chunks));
   });
   tx();
   logger.info('kb', 'document reindexed', { id, ownerId, username: getUsername(ownerId), chunks: chunks.length });

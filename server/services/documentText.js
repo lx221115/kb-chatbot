@@ -1,4 +1,7 @@
 import path from 'node:path';
+import { createReadStream } from 'node:fs';
+import { open, readFile } from 'node:fs/promises';
+import { StringDecoder } from 'node:string_decoder';
 import mammoth from 'mammoth';
 import XLSX from 'xlsx';
 import { strFromU8, unzipSync } from 'fflate';
@@ -17,8 +20,6 @@ export const SUPPORTED_EXTENSIONS = [
   '.pptx',
   '.pdf'
 ];
-
-export const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
 
 const LEGACY_HINT = {
   '.doc': '不支持旧版 .doc 二进制格式，请用 Word 另存为 .docx 后上传',
@@ -58,26 +59,57 @@ function decodeXml(text) {
   });
 }
 
-function decodePlainText(buffer) {
-  if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
-    return buffer.subarray(3).toString('utf8');
+// 纯文本按流解码：只保留 64KB 输入块 + 结果字符串，避免整文件 Buffer 与字符串同时驻留
+async function decodePlainTextFile(filePath) {
+  const handle = await open(filePath, 'r');
+  const head = Buffer.alloc(3);
+  let bytesRead = 0;
+  try {
+    ({ bytesRead } = await handle.read(head, 0, 3, 0));
+  } finally {
+    await handle.close();
   }
-  if (buffer[0] === 0xff && buffer[1] === 0xfe) return buffer.subarray(2).toString('utf16le');
-  if (buffer[0] === 0xfe && buffer[1] === 0xff) {
-    const swapped = Buffer.from(buffer.subarray(2));
+
+  if (bytesRead >= 2 && head[0] === 0xfe && head[1] === 0xff) {
+    // 大端 UTF-16 先整读再字节交换，这种编码极少见，单独处理
+    const raw = await readFile(filePath);
+    const body = raw.subarray(2, raw.length - (raw.length % 2));
+    const swapped = Buffer.from(body);
     swapped.swap16();
     return swapped.toString('utf16le');
   }
-  return buffer.toString('utf8');
+
+  let skip = 0;
+  let encoding = 'utf8';
+  if (bytesRead >= 3 && head[0] === 0xef && head[1] === 0xbb && head[2] === 0xbf) {
+    skip = 3;
+  } else if (bytesRead >= 2 && head[0] === 0xff && head[1] === 0xfe) {
+    skip = 2;
+    encoding = 'utf16le';
+  }
+
+  const decoder = new StringDecoder(encoding);
+  const parts = [];
+  let first = true;
+  for await (const chunk of createReadStream(filePath)) {
+    let buf = chunk;
+    if (first) {
+      first = false;
+      if (skip) buf = buf.subarray(skip);
+    }
+    parts.push(decoder.write(buf));
+  }
+  parts.push(decoder.end());
+  return parts.join('');
 }
 
-async function extractDocx(buffer) {
-  const { value } = await mammoth.extractRawText({ buffer });
+async function extractDocx(filePath) {
+  const { value } = await mammoth.extractRawText({ path: filePath });
   return value;
 }
 
-function extractSpreadsheet(buffer) {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
+function extractSpreadsheet(filePath) {
+  const workbook = XLSX.readFile(filePath, { dense: true });
   const parts = [];
   for (const name of workbook.SheetNames) {
     const sheet = workbook.Sheets[name];
@@ -103,9 +135,10 @@ function slideXmlToText(xml) {
   return lines.join('\n');
 }
 
-function extractPptx(buffer) {
+async function extractPptx(filePath) {
+  const buffer = await readFile(filePath);
   // 只解压幻灯片 XML，避免图片/媒体占用内存
-  const files = unzipSync(new Uint8Array(buffer), {
+  const files = unzipSync(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength), {
     filter: (file) => /^ppt\/slides\/slide\d+\.xml$/.test(file.name)
   });
   const slides = Object.keys(files)
@@ -127,8 +160,9 @@ function extractPptx(buffer) {
     .join('\n\n');
 }
 
-async function extractPdf(buffer) {
-  const pdf = await getDocumentProxy(new Uint8Array(buffer));
+async function extractPdf(filePath) {
+  const buffer = await readFile(filePath);
+  const pdf = await getDocumentProxy(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength));
   const { text } = await extractText(pdf, { mergePages: false });
   const pages = Array.isArray(text) ? text : [text];
   return pages
@@ -140,19 +174,19 @@ async function extractPdf(buffer) {
     .join('\n\n');
 }
 
-async function extractByExtension(ext, buffer) {
+async function extractByExtension(ext, filePath) {
   if (['.txt', '.md', '.markdown', '.csv', '.log', '.json'].includes(ext)) {
-    return decodePlainText(buffer);
+    return decodePlainTextFile(filePath);
   }
-  if (ext === '.docx') return extractDocx(buffer);
-  if (ext === '.xlsx' || ext === '.xls') return extractSpreadsheet(buffer);
-  if (ext === '.pptx') return extractPptx(buffer);
-  if (ext === '.pdf') return extractPdf(buffer);
+  if (ext === '.docx') return extractDocx(filePath);
+  if (ext === '.xlsx' || ext === '.xls') return extractSpreadsheet(filePath);
+  if (ext === '.pptx') return extractPptx(filePath);
+  if (ext === '.pdf') return extractPdf(filePath);
   if (LEGACY_HINT[ext]) throw httpError(LEGACY_HINT[ext]);
   throw httpError(`暂不支持 ${ext} 格式，支持：${SUPPORTED_EXTENSIONS.join(' / ')}`);
 }
 
-export async function extractDocumentText(buffer, filename) {
+export async function extractDocumentText(filePath, filename) {
   const ext = path.extname(filename).toLowerCase();
   if (!ext) throw httpError('文件缺少扩展名，无法判断格式');
   if (LEGACY_HINT[ext]) throw httpError(LEGACY_HINT[ext]);
@@ -162,16 +196,15 @@ export async function extractDocumentText(buffer, filename) {
 
   let text;
   try {
-    text = await extractByExtension(ext, buffer);
+    text = await extractByExtension(ext, filePath);
   } catch (err) {
     if (err.status) throw err;
     throw httpError(`${ext.slice(1).toUpperCase()} 解析失败：${err.message}`);
   }
 
+  // 合并成一次替换，避免大文本连续多次全量拷贝；\n{3,} 需排在单 \n 匹配之前
   const normalized = text
-    .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n{3,}|[ \t]*\r?\n|\r/g, (match) => (match[0] === '\n' ? '\n\n' : '\n'))
     .trim();
 
   if (!normalized) {

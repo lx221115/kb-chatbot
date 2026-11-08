@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, ref, watch } from 'vue';
+import { nextTick, onMounted, ref, watch } from 'vue';
 import { api } from '../api.js';
 
 const props = defineProps({ conversationId: { type: Number, default: null } });
@@ -14,6 +14,15 @@ const fileRef = ref(null);
 const editing = ref(null);
 const editText = ref('');
 const saving = ref(false);
+const maxUploadMB = ref(100);
+
+onMounted(async () => {
+  try {
+    maxUploadMB.value = (await api.getConfig()).maxUploadMB || maxUploadMB.value;
+  } catch {
+    // 配置接口失败时沿用默认展示，实际上限仍以服务端为准
+  }
+});
 
 const SUGGESTIONS = ['/知识库列表', '/添加知识库 今天天气适合阅读', '/帮助'];
 
@@ -97,6 +106,12 @@ function onKeydown(e) {
 async function onFile(e) {
   const file = e.target.files?.[0];
   if (!file) return;
+  if (file.size > maxUploadMB.value * 1024 * 1024) {
+    messages.value.push({ role: 'assistant', content: `文件超过 ${maxUploadMB.value}MB 上限` });
+    e.target.value = '';
+    await scrollBottom();
+    return;
+  }
   uploading.value = true;
   try {
     const doc = await api.uploadDoc(file);
@@ -163,7 +178,7 @@ function autoGrow(e) {
     <div class="composer-wrap">
       <div class="composer">
         <div class="toolbar">
-          <button class="tool" :disabled="uploading" title="上传文件（Word / Excel / PPT / PDF / 文本，≤30MB）" @click="fileRef.click()">
+          <button class="tool" :disabled="uploading" :title="`上传文件（Word / Excel / PPT / PDF / 文本，≤${maxUploadMB}MB）`" @click="fileRef.click()">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
             {{ uploading ? '解析中…' : '文件' }}
           </button>

@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import multer from 'multer';
 import {
@@ -9,21 +13,51 @@ import {
   updateChunk,
   updateDocument
 } from '../services/ingest.js';
-import {
-  MAX_UPLOAD_BYTES,
-  extractDocumentText,
-  normalizeFilename,
-  restoreFilename
-} from '../services/documentText.js';
+import { normalizeFilename, restoreFilename } from '../services/documentText.js';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../lib/config.js';
+import { parseDocumentFile } from '../lib/parserPool.js';
 import { asyncHandler } from '../middleware/errors.js';
 import { fetchUrl } from '../lib/urlfetch.js';
 
 const router = Router();
 
+// 上传先落盘再交给解析 worker，避免整个文件常驻主线程内存
+const UPLOAD_DIR = path.join(os.tmpdir(), 'kb-chatbot-uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const STALE_UPLOAD_MS = 60 * 60 * 1000;
+function sweepStaleUploads() {
+  for (const name of fs.readdirSync(UPLOAD_DIR)) {
+    const target = path.join(UPLOAD_DIR, name);
+    try {
+      if (fs.statSync(target).mtimeMs < Date.now() - STALE_UPLOAD_MS) fs.rmSync(target, { force: true });
+    } catch {
+      // 单个文件清理失败不影响其余文件
+    }
+  }
+}
+sweepStaleUploads();
+// multer 超限/中断会自行清理，这里兜底进程崩溃残留；长期运行不重启也能清掉
+const sweepTimer = setInterval(sweepStaleUploads, STALE_UPLOAD_MS);
+sweepTimer.unref();
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 10);
+    cb(null, `${Date.now()}-${randomUUID()}${ext}`);
+  }
+});
+
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage,
   limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }
 });
+
+async function removeTempFile(filePath) {
+  if (!filePath) return;
+  await fs.promises.rm(filePath, { force: true }).catch(() => {});
+}
 
 router.get('/', (req, res) => {
   res.json(listDocuments(req.userId));
@@ -63,24 +97,27 @@ router.post(
   (req, res, next) => {
     upload.single('file')(req, res, (err) => {
       if (!err) return next();
-      const message = err.code === 'LIMIT_FILE_SIZE'
-        ? `文件超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB 上限`
+      removeTempFile(req.file?.path);
+      const tooLarge = err.code === 'LIMIT_FILE_SIZE';
+      const message = tooLarge
+        ? `文件超过 ${MAX_UPLOAD_MB}MB 上限`
         : `文件上传失败：${err.message}`;
-      res.status(400).json({ error: message });
+      res.status(tooLarge ? 413 : 400).json({ error: message });
     });
   },
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: '缺少文件字段 file' });
     const filename = normalizeFilename(req.body?.filename || restoreFilename(req.file.originalname));
-    const { text, format } = await extractDocumentText(req.file.buffer, filename);
-    const doc = addDocument({
-      title: filename,
-      sourceType: 'file',
-      sourceRef: filename,
-      content: text,
-      ownerId: req.userId
-    });
-    res.json({ ...doc, format, chars: text.length });
+    try {
+      // 解析、分块、分词和落库都在 worker 线程，主线程只等待文档信息
+      const { format, chars, doc } = await parseDocumentFile(req.file.path, filename, {
+        title: filename,
+        ownerId: req.userId
+      });
+      res.json({ ...doc, format, chars });
+    } finally {
+      await removeTempFile(req.file.path);
+    }
   })
 );
 

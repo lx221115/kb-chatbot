@@ -9,6 +9,8 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 export const db = new Database(path.join(DATA_DIR, 'kb.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+// 解析 worker 与主线程各自持有连接，大文档落库的长事务期间另一方写入需等待锁
+db.pragma('busy_timeout = 30000');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(

@@ -19,11 +19,19 @@ const pickedFile = ref(null);
 const uploading = ref(false);
 const expanded = ref(null);
 const detail = ref(null);
+const maxUploadMB = ref(100);
 
 async function refresh() {
   docs.value = await api.listDocs();
 }
-onMounted(refresh);
+onMounted(async () => {
+  refresh();
+  try {
+    maxUploadMB.value = (await api.getConfig()).maxUploadMB || maxUploadMB.value;
+  } catch {
+    // 配置接口失败时沿用默认展示，实际上限仍以服务端为准
+  }
+});
 
 async function ingest() {
   busy.value = true;
@@ -48,7 +56,14 @@ async function ingest() {
 }
 
 function pickFile(e) {
-  pickedFile.value = e.target.files?.[0] || null;
+  const file = e.target.files?.[0] || null;
+  if (file && file.size > maxUploadMB.value * 1024 * 1024) {
+    status.value = `文件超过 ${maxUploadMB.value}MB 上限`;
+    pickedFile.value = null;
+    e.target.value = '';
+    return;
+  }
+  pickedFile.value = file;
 }
 
 async function uploadPicked() {
@@ -111,7 +126,7 @@ async function remove(id) {
         <button class="primary" :disabled="!pickedFile || uploading" @click="uploadPicked">
           {{ uploading ? '解析并入库中…' : '上传并加入知识库' }}
         </button>
-        <p class="tip">支持 Word（.docx）、Excel（.xlsx/.xls）、PPT（.pptx）、PDF，以及 .txt/.md/.csv/.json/.log，单个文件 ≤ 30MB。</p>
+        <p class="tip">支持 Word（.docx）、Excel（.xlsx/.xls）、PPT（.pptx）、PDF，以及 .txt/.md/.csv/.json/.log，单个文件 ≤ {{ maxUploadMB }}MB。</p>
       </div>
       <div v-else-if="tab === 'text'" class="form">
         <input v-model="title" placeholder="标题（可选）" />

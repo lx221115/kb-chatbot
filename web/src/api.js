@@ -38,6 +38,7 @@ export const api = {
     request('/api/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   me: () => request('/api/auth/me'),
+  getConfig: () => request('/api/config'),
 
   getSettings: () => request('/api/settings'),
   saveSettings: (body) => request('/api/settings', { method: 'PUT', body: JSON.stringify(body) }),

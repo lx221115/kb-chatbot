@@ -78,6 +78,20 @@ docker run -d -p 3000:3000 \
 
 SQLite 文件默认放在 `./data`，可用 `DATA_DIR` 改到挂载卷（如 `/app/data`）。**必须持久化该目录**，否则容器/Pod 重建会丢失 `kb.db`。容器以 `node`（uid 1000）运行，bind mount 宿主机目录时需保证该目录对 1000 可写。
 
+### 上传与解析
+
+单个上传文件默认上限 100MB，可用 `MAX_UPLOAD_MB` 调整（例如 `-e MAX_UPLOAD_MB=200`）。上传文件先写入系统临时目录，再由独立的 worker 线程完成解析、分块、分词和 SQLite 落库，主线程只接收入库结果，因此解析大文件不会阻塞聊天等其他请求；临时文件在入库后立即删除，进程异常退出后的残留会在启动时及运行期间定期清理。
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `MAX_UPLOAD_MB` | 100 | 单个上传文件上限 |
+| `MAX_JSON_BODY_MB` | 30 | 文本/URL 入库的 JSON 请求体上限 |
+| `PARSER_CONCURRENCY` | 1 | 同时解析的文件数，调大需相应增加内存 |
+| `PARSER_MEMORY_MB` | 768 | 单个解析 worker 的 V8 堆上限，超限会返回明确错误 |
+| `PARSER_TIMEOUT_MS` | 300000 | 单个文件解析超时 |
+
+若前面有 nginx / Ingress，请同步调大请求体限制（如 `client_max_body_size 100m`、`nginx.ingress.kubernetes.io/proxy-body-size: 100m`）。容器内存上限需覆盖主进程、解析 worker 和 SQLite 缓存，100MB 文件建议至少 2Gi。
+
 ### 重新部署
 
 **Windows 双击部署**：直接双击项目根目录的 `redeploy.cmd`，通过菜单选择「重新构建并部署 / 仅重建容器 / 修改部署参数 / 查看容器状态」，可交互设置镜像名、容器名、宿主机端口、数据卷、环境变量文件、构建源与是否拉取基础镜像。脚本依赖 Git for Windows 提供的 bash，内部调用下文的 `scripts/redeploy.sh`。脚本会优先使用 Git 安装目录下的 `bash.exe`，并跳过 WSL 自带的同名程序；如仍找不到，可设置环境变量 `BASH_EXE` 指向 Git Bash。
@@ -209,13 +223,18 @@ server/
     userMeta.js     userId → username 查询缓存（日志用）
     tokenizer.js    中文 bigram + 英文词分词、停用词
     urlfetch.js     网页正文抓取（cheerio）
+    config.js       上传上限与解析 worker 参数（环境变量可调）
+    chunking.js     文本分块（主线程入库与解析 worker 共用）
+    parserPool.js   解析 worker 串行队列、超时与内存限制
+  workers/
+    documentParser.js 文件解析 worker（解析/分块/分词，不阻塞主线程）
   services/       业务服务
     auth.js         注册/登录/token 会话与鉴权中间件
     conversations.js 会话与消息数据访问
     chat.js         对话轮核心逻辑（指令 / SAG2 检索 + JEV + 生成）
     commands.js     会话内斜杠指令
     ingest.js       分块、知识库 CRUD 与片段级索引重建（按 owner 隔离）
-    documentText.js 上传文件文本提取（docx/xlsx/xls/pptx/pdf/纯文本）
+    documentText.js 上传文件文本提取（docx/xlsx/xls/pptx/pdf/纯文本，按文件路径流式读取）
     corrections.js  精准修正：旧值定位、多候选处理、基于会话证据的模型改写
     retrieve.js     SAG2：BM25 多跳 + JEV 验证
     llm.js          OpenAI 兼容 / Anthropic 双协议客户端 + 用户级配置
@@ -241,5 +260,5 @@ logs/              运行日志 app-YYYY-MM-DD.log（gitignore）
 
 ## 说明
 
-- 文件上传由服务端解析后入库：Word（.docx）、Excel（.xlsx/.xls）、PPT（.pptx）、PDF，以及纯文本类（.txt/.md/.markdown/.csv/.json/.log），单个文件上限 30MB；旧版二进制 .doc/.ppt 需另存为新格式。扫描版 PDF 无文本层，暂不支持 OCR
+- 文件上传先落临时目录，再交给独立 worker 线程解析、分块和分词，主线程只做落库，解析大文件不阻塞其他请求：Word（.docx）、Excel（.xlsx/.xls）、PPT（.pptx）、PDF，以及纯文本类（.txt/.md/.markdown/.csv/.json/.log），单个文件默认上限 100MB（`MAX_UPLOAD_MB` 可调）；旧版二进制 .doc/.ppt 需另存为新格式。扫描版 PDF 无文本层，暂不支持 OCR
 - API Key 以明文存于本地 SQLite（单机个人应用）；如需共享部署请自行加加密层

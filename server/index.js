@@ -7,6 +7,7 @@ import path from 'node:path';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 import { authMiddleware } from './services/auth.js';
+import { MAX_JSON_BODY_MB, MAX_UPLOAD_MB } from './lib/config.js';
 import { initLogger, logger } from './lib/logger.js';
 import { createMcpServer } from './services/mcpServer.js';
 import { accessLog } from './middleware/accessLog.js';
@@ -25,14 +26,16 @@ const PORT = Number(process.env.PORT || 3000);
 
 app.use(cors());
 app.use(accessLog);
-app.use(express.json({ limit: '30mb' }));
+app.use(express.json({ limit: `${MAX_JSON_BODY_MB}mb` }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // 认证路由内部对 logout/me 单独鉴权，register/login 保持公开
 app.use('/api/auth', authRouter);
-// 其余 /api 接口统一要求登录
+// 剩余 /api 接口统一要求登录
 app.use('/api', authMiddleware);
+
+app.get('/api/config', (_req, res) => res.json({ maxUploadMB: MAX_UPLOAD_MB }));
 
 app.use('/api/settings', settingsRouter);
 app.use('/api/conversations', conversationsRouter);
