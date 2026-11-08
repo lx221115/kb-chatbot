@@ -2,6 +2,7 @@
   "name": "kb-chatbot",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "基于 SAG2（SQLite FTS5 + BM25 + JEV）的可动态增删改查知识库聊天机器人",
   "scripts": {
