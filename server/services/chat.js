@@ -23,7 +23,7 @@ export async function runChatTurn(userId, message, conversationId) {
   try {
     if (isCommand(message)) {
       type = 'command';
-      const result = await runCommand(message, userId);
+      const result = await runCommand(message, userId, { conversationId: convId });
       reply = result.reply;
     } else {
       const cfg = getLlmConfig(userId);

@@ -1,5 +1,13 @@
 import { Router } from 'express';
-import { addDocument, deleteDocument, getDocument, listDocuments, updateDocument } from '../services/ingest.js';
+import {
+  addDocument,
+  deleteDocument,
+  getDocument,
+  listDocuments,
+  replaceInChunk,
+  updateChunk,
+  updateDocument
+} from '../services/ingest.js';
 import { asyncHandler } from '../middleware/errors.js';
 import { fetchUrl } from '../lib/urlfetch.js';
 
@@ -41,6 +49,31 @@ router.put('/:id', (req, res) => {
   const doc = updateDocument(Number(req.params.id), req.body || {}, req.userId);
   if (!doc) return res.status(404).json({ error: '文档不存在' });
   res.json(doc);
+});
+
+// 片段级修正：传 text 整段替换，或传 oldValue/newValue 做子串替换
+router.patch('/:id/chunks/:seq', (req, res) => {
+  const docId = Number(req.params.id);
+  const seqLabel = Number(req.params.seq);
+  if (!Number.isInteger(docId) || !Number.isInteger(seqLabel) || seqLabel < 1) {
+    return res.status(400).json({ error: '片段序号需为从 1 开始的整数' });
+  }
+  const seq = seqLabel - 1;
+  const { text, oldValue, newValue } = req.body || {};
+
+  if (typeof text === 'string') {
+    const updated = updateChunk(docId, seq, text, req.userId);
+    if (!updated) return res.status(404).json({ error: '文档或片段不存在' });
+    return res.json(updated);
+  }
+  if (typeof oldValue === 'string' && typeof newValue === 'string') {
+    const result = replaceInChunk(docId, seq, oldValue, newValue, req.userId);
+    if (result.status === 'not_found') return res.status(404).json({ error: '文档或片段不存在' });
+    if (result.status === 'value_missing') return res.status(409).json({ error: '该片段中不包含 oldValue' });
+    if (result.status === 'no_change') return res.status(400).json({ error: '新旧值一致，未做修改' });
+    return res.json(result);
+  }
+  return res.status(400).json({ error: '需提供 text，或 oldValue 与 newValue' });
 });
 
 router.delete('/:id', (req, res) => {

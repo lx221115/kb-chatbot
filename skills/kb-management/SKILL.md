@@ -1,6 +1,6 @@
 ---
 name: kb-management
-description: Manage the KB Chatbot knowledge base (SAG2: SQLite FTS5 + BM25 + JEV) through its built-in MCP endpoint. Use when an agent needs to add, list, read, update, delete, or search knowledge documents, ingest text/files/web URLs, or ask the knowledge-base bot questions via kb_chat. Triggers on requests like "加入知识库 / 更新知识库 / 删除文档 / 检索知识库 / 问知识库".
+description: Manage the KB Chatbot knowledge base (SAG2: SQLite FTS5 + BM25 + JEV) through its built-in MCP endpoint. Use when an agent needs to add, list, read, update, delete, or search knowledge documents, ingest text/files/web URLs, correct a single chunk by old/new value, or ask the knowledge-base bot questions via kb_chat. Triggers on requests like "加入知识库 / 更新知识库 / 修正某段内容 / 删除文档 / 检索知识库 / 问知识库".
 ---
 
 # KB Chatbot 知识库管理
@@ -60,7 +60,9 @@ token 存在服务端 `sessions` 表（SQLite，跨重启保留），调用 `/ap
 | `kb_add_url` | 抓取网页正文入库 | `url` |
 | `kb_list_documents` | 列出全部文档 | 无 |
 | `kb_get_document` | 读取文档详情与分块 | `id` |
-| `kb_update_document` | 改标题或内容（改内容会重新分块索引） | `id`, `title?`, `content?` |
+| `kb_update_document` | 整篇改标题或内容（改内容会重新分块索引） | `id`, `title?`, `content?` |
+| `kb_update_chunk` | 精准改单个片段，保留分块与序号，索引立即生效 | `docId`, `seq`(从 1 开始), `text` |
+| `kb_replace_text` | 精准替换旧值：指定 `docId+seq` 只改该片段；省略则全库定位，多命中返回候选 | `oldValue`, `newValue`, `docId?`, `seq?` |
 | `kb_delete_document` | 删除文档及其全部片段（不可恢复） | `id` |
 | `kb_search` | BM25 全文检索，返回相关片段 | `query` |
 | `kb_chat` | 机器人问答：SAG2 多跳检索 + JEV 验证 + LLM 生成；`/` 开头按指令执行 | `message`, `conversationId?` |
@@ -71,7 +73,8 @@ token 存在服务端 `sessions` 表（SQLite，跨重启保留），调用 `/ap
 
 - **增**：优先 `kb_add_text`；有源网页用 `kb_add_url`（自动抽取正文与标题）；模拟文件上传用 `kb_add_file`。入库即自动分块并建立 BM25 索引，零模型调用。
 - **查**：先 `kb_list_documents` 拿 id，再 `kb_get_document` 读全文；只想找相关片段用 `kb_search`（比读取整篇更省 token）。
-- **改**：`kb_update_document` 传 `content` 会丢弃旧分块并重新索引；只传 `title` 则仅改名。
+- **改**：只改一处事实（地址、负责人、数字等）时优先 `kb_replace_text`：给旧值和新值即可，全库唯一命中才自动替换，多命中会返回候选；已知片段位置则传 `docId+seq`。需要重写整段用 `kb_update_chunk`，两者都不会重新分块。只有整篇结构变化才用 `kb_update_document`（会丢弃旧分块并重新索引）。
+- **定位片段**：`kb_get_document` 返回的 `chunks` 数组下标 + 1 即片段序号；`kb_search` 结果里的 `seq + 1` 同理。
 - **删**：`kb_delete_document` 不可逆，删除前建议先 `kb_get_document` 确认标题。
 - **问**：`kb_chat` 面向"根据知识库回答"。需要机器人自动检索并综合时用自然语言 `message`；需要确定性执行某项管理动作时，用 `/` 指令，例如 `/知识库列表`、`/查询知识库 <关键词>`、`/添加知识库 <文本>`、`/帮助`。
 - **未配置模型密钥时**：`kb_chat` 的自然语言问答会降级为提示（需要用户在 Web「模型设置」或后端 `.env` 配置 LLM Key），但 `/` 指令与 `kb_search`、增删改查仍完全可用。
@@ -80,7 +83,7 @@ token 存在服务端 `sessions` 表（SQLite，跨重启保留），调用 `/ap
 
 1. 用户给一批资料 → 逐条 `kb_add_text`（或 `kb_add_url`）入库。
 2. 用户提问 → `kb_search` 快速定位，或 `kb_chat` 让机器人生成带证据的回答。
-3. 用户要修订 → `kb_list_documents` 找到 id → `kb_update_document`。
+3. 用户要修订单条事实 → `kb_replace_text`（旧值 => 新值）；要重写某一段 → `kb_update_chunk`；整篇重构才用 `kb_update_document`。
 4. 用户要清理 → `kb_delete_document`。
 
 ## 验证

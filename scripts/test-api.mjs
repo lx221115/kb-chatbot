@@ -63,6 +63,61 @@ out('指令 /添加知识库(会话内文本)', await req('/api/chat', {
   body: JSON.stringify({ message: '/添加知识库 会议纪要|2026-11-07 决定采用 SAG2 架构，因其索引无需模型调用，动态增删改查只是 SQL 行操作。' })
 }));
 
+// ===== 片段级精准修正 =====
+const stamp = Date.now();
+const oldAddr = `http://old-${stamp}.example.com`;
+const newAddr = `https://new-${stamp}.example.com`;
+const doc3 = await req('/api/documents', {
+  method: 'POST',
+  body: JSON.stringify({ type: 'text', title: `运维手册-${stamp}`, content: `OA 系统地址：${oldAddr}。负责人：张三。` })
+});
+out('添加精准修正测试文档', doc3);
+
+out('指令 /修正知识库 旧值=>新值', await req('/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({ message: `/修正知识库 ${oldAddr} => ${newAddr}` })
+}));
+out('修正后文档内容', await req(`/api/documents/${doc3.id}`));
+out('修正后检索新地址', await req('/api/search?q=' + encodeURIComponent(newAddr)));
+
+out('指令 /修正知识库 指定片段替换负责人', await req('/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({ message: `/修正知识库 ${doc3.id}:1 => 张三 => 李四` })
+}));
+out('HTTP PATCH 片段整段替换', await req(`/api/documents/${doc3.id}/chunks/1`, {
+  method: 'PATCH',
+  body: JSON.stringify({ text: `OA 系统地址：${newAddr}。负责人：李四。电话：123456。` })
+}));
+out('HTTP PATCH 片段子串替换', await req(`/api/documents/${doc3.id}/chunks/1`, {
+  method: 'PATCH',
+  body: JSON.stringify({ oldValue: '123456', newValue: '654321' })
+}));
+out('修正后最终片段', await req(`/api/documents/${doc3.id}`));
+
+const shared = `共享旧值-${stamp}`;
+const doc4a = await req('/api/documents', {
+  method: 'POST',
+  body: JSON.stringify({ type: 'text', title: `共享A-${stamp}`, content: `共享内容 ${shared}，用于多候选测试。` })
+});
+const doc4b = await req('/api/documents', {
+  method: 'POST',
+  body: JSON.stringify({ type: 'text', title: `共享B-${stamp}`, content: `共享内容 ${shared}，用于多候选测试。` })
+});
+out('全库多候选修正提示', await req('/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({ message: `/修正知识库 ${shared} => 新的共享值` })
+}));
+out('指定片段修正多候选', await req('/api/chat', {
+  method: 'POST',
+  body: JSON.stringify({ message: `/修正知识库 ${doc4a.id}:1 => ${shared} => 已修正的共享值` })
+}));
+
+out('清理精准修正测试文档', [
+  await req(`/api/documents/${doc3.id}`, { method: 'DELETE' }),
+  await req(`/api/documents/${doc4a.id}`, { method: 'DELETE' }),
+  await req(`/api/documents/${doc4b.id}`, { method: 'DELETE' })
+]);
+
 out('指令 /删除知识库', await req('/api/chat', {
   method: 'POST',
   body: JSON.stringify({ message: `/删除知识库 ${doc2.id}` })

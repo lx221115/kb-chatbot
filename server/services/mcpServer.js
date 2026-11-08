@@ -4,7 +4,8 @@ import { logger } from '../lib/logger.js';
 import { userMeta } from '../lib/userMeta.js';
 import { fetchUrl } from '../lib/urlfetch.js';
 import { runChatTurn } from './chat.js';
-import { addDocument, deleteDocument, getDocument, listDocuments, updateDocument } from './ingest.js';
+import { replaceAcross, replaceAt } from './corrections.js';
+import { addDocument, deleteDocument, getDocument, listDocuments, updateChunk, updateDocument } from './ingest.js';
 import { searchOnly } from './retrieve.js';
 
 function ok(data) {
@@ -73,7 +74,7 @@ export function createMcpServer(userId) {
 
   server.tool(
     'kb_update_document',
-    '更新知识库文档的标题或内容（传了 content 会重新分块与索引）',
+    '整篇更新知识库文档的标题或内容（传了 content 会重新分块与索引；只改局部请用 kb_update_chunk / kb_replace_text）',
     {
       id: z.number().describe('文档 id'),
       title: z.string().describe('新标题（可选）').optional(),
@@ -83,6 +84,48 @@ export function createMcpServer(userId) {
       const doc = updateDocument(id, { title, content }, userId);
       if (!doc) throw new Error('文档不存在');
       return doc;
+    })
+  );
+
+  server.tool(
+    'kb_update_chunk',
+    '精准更新知识库中的单个片段：保留文档分块与片段序号，仅重建该片段的全文索引，修改后立即可检索',
+    {
+      docId: z.number().describe('文档 id'),
+      seq: z.number().int().min(1).describe('片段序号，从 1 开始（可用 kb_get_document 查看）'),
+      text: z.string().describe('新的片段全文')
+    },
+    handler('kb_update_chunk', ({ docId, seq, text }) => {
+      const updated = updateChunk(docId, seq - 1, text, userId);
+      if (!updated) throw new Error('文档或片段不存在');
+      return updated;
+    })
+  );
+
+  server.tool(
+    'kb_replace_text',
+    '精准替换知识库中的旧值：提供 docId+seq 时只改该片段，否则全库定位；全库仅唯一命中时自动替换，多命中返回候选',
+    {
+      oldValue: z.string().describe('要替换的旧文本，需在片段中连续出现'),
+      newValue: z.string().describe('替换后的新文本'),
+      docId: z.number().describe('限定文档 id（可选）').optional(),
+      seq: z.number().int().min(1).describe('限定片段序号，从 1 开始（可选，需与 docId 同时提供）').optional()
+    },
+    handler('kb_replace_text', ({ oldValue, newValue, docId, seq }) => {
+      if (docId != null || seq != null) {
+        if (docId == null || seq == null) throw new Error('docId 与 seq 需同时提供');
+        const result = replaceAt(docId, seq - 1, oldValue, newValue, userId);
+        if (result.status === 'not_found') throw new Error('文档或片段不存在');
+        if (result.status === 'value_missing') throw new Error('该片段中不包含 oldValue');
+        if (result.status === 'no_change') throw new Error('新旧值一致，未做修改');
+        return result;
+      }
+      const result = replaceAcross(oldValue, newValue, userId);
+      if (result.status === 'ambiguous') return result;
+      if (result.status === 'not_found') throw new Error('知识库中未找到包含 oldValue 的片段');
+      if (result.status === 'invalid') throw new Error('oldValue 与 newValue 不能为空');
+      if (result.status === 'no_change') throw new Error('新旧值一致，未做修改');
+      return result;
     })
   );
 

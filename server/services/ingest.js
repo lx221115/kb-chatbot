@@ -5,6 +5,7 @@ import { getUsername } from '../lib/userMeta.js';
 
 const CHUNK_SIZE = 400;
 const CHUNK_OVERLAP = 60;
+const MAX_CHUNK_CHARS = 2000;
 
 export function splitChunks(text) {
   const normalized = text.replace(/\r\n/g, '\n').trim();
@@ -79,6 +80,68 @@ export function updateDocument(id, { title, content }, ownerId) {
   tx();
   logger.info('kb', 'document reindexed', { id, ownerId, username: getUsername(ownerId), chunks: chunks.length });
   return { id, title: title ?? doc.title, chunkCount: chunks.length };
+}
+
+function reindexChunk(chunkId, text) {
+  db.prepare('DELETE FROM chunks_fts WHERE chunk_id=?').run(chunkId);
+  db.prepare('INSERT INTO chunks_fts(chunk_id, tokens) VALUES (?,?)').run(chunkId, contentTokens(text).join(' '));
+}
+
+// seq 从 0 开始（内部存储），对外统一按 1-based 片段序号展示
+export function getChunk(docId, seq, ownerId) {
+  return (
+    db
+      .prepare(
+        `SELECT c.id AS chunkId, c.doc_id AS docId, c.seq, c.text, d.title
+         FROM chunks c JOIN documents d ON d.id=c.doc_id
+         WHERE c.doc_id=? AND c.seq=? AND d.owner_id=?`
+      )
+      .get(docId, seq, ownerId) ?? null
+  );
+}
+
+export function updateChunk(docId, seq, text, ownerId) {
+  const chunk = getChunk(docId, seq, ownerId);
+  if (!chunk) return null;
+  if (typeof text !== 'string') throw Object.assign(new Error('片段内容必须是字符串'), { status: 400 });
+  const next = text.trim();
+  if (!next) throw Object.assign(new Error('片段内容不能为空'), { status: 400 });
+  if (next.length > MAX_CHUNK_CHARS) {
+    throw Object.assign(new Error(`片段内容过长（上限 ${MAX_CHUNK_CHARS} 字）`), { status: 400 });
+  }
+  if (next === chunk.text) {
+    return { docId, seq, title: chunk.title, oldText: chunk.text, text: next, changed: false };
+  }
+  db.transaction(() => {
+    db.prepare('UPDATE chunks SET text=? WHERE id=?').run(next, chunk.chunkId);
+    reindexChunk(chunk.chunkId, next);
+    db.prepare("UPDATE documents SET updated_at=datetime('now','localtime') WHERE id=?").run(docId);
+  })();
+  logger.info('kb', 'chunk updated', {
+    docId,
+    seq,
+    ownerId,
+    username: getUsername(ownerId),
+    chars: next.length
+  });
+  return { docId, seq, title: chunk.title, oldText: chunk.text, text: next, changed: true };
+}
+
+export function replaceInChunk(docId, seq, oldValue, newValue, ownerId) {
+  const chunk = getChunk(docId, seq, ownerId);
+  if (!chunk) return { status: 'not_found' };
+  if (!oldValue || !chunk.text.includes(oldValue)) return { status: 'value_missing', chunk };
+  if (oldValue === newValue) return { status: 'no_change', chunk };
+  const occurrences = chunk.text.split(oldValue).length - 1;
+  const updated = updateChunk(docId, seq, chunk.text.split(oldValue).join(newValue), ownerId);
+  logger.info('kb', 'chunk text replaced', {
+    docId,
+    seq,
+    ownerId,
+    username: getUsername(ownerId),
+    occurrences
+  });
+  return { status: 'ok', occurrences, ...updated };
 }
 
 export function deleteDocument(id, ownerId) {

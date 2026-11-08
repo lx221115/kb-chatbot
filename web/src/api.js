@@ -53,5 +53,7 @@ export const api = {
   addUrl: (url) => request('/api/documents', { method: 'POST', body: JSON.stringify({ type: 'url', url }) }),
   addFile: (filename, content) =>
     request('/api/documents', { method: 'POST', body: JSON.stringify({ type: 'file', filename, content }) }),
-  deleteDoc: (id) => request(`/api/documents/${id}`, { method: 'DELETE' })
+  deleteDoc: (id) => request(`/api/documents/${id}`, { method: 'DELETE' }),
+  updateChunk: (docId, seq, text) =>
+    request(`/api/documents/${docId}/chunks/${seq}`, { method: 'PATCH', body: JSON.stringify({ text }) })
 };

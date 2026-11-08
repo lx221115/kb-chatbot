@@ -10,12 +10,16 @@ const input = ref('');
 const busy = ref(false);
 const listRef = ref(null);
 const fileRef = ref(null);
+const editing = ref(null);
+const editText = ref('');
+const saving = ref(false);
 
 const SUGGESTIONS = ['/知识库列表', '/添加知识库 今天天气适合阅读', '/帮助'];
 
 watch(
   () => props.conversationId,
   async (id) => {
+    editing.value = null;
     if (!id) { messages.value = []; return; }
     const conv = await api.getConversation(id);
     messages.value = conv.messages;
@@ -45,6 +49,39 @@ async function send(text) {
     messages.value.push({ role: 'assistant', content: `出错了：${err.message}` });
   } finally {
     busy.value = false;
+    await scrollBottom();
+  }
+}
+
+function startEdit(e) {
+  editing.value = { docId: e.docId, seq: e.seq };
+  editText.value = e.text;
+}
+
+function cancelEdit() {
+  editing.value = null;
+  editText.value = '';
+}
+
+async function saveEdit() {
+  if (!editing.value || saving.value) return;
+  const { docId, seq } = editing.value;
+  const text = editText.value.trim();
+  if (!text) return;
+  saving.value = true;
+  try {
+    const updated = await api.updateChunk(docId, seq + 1, text);
+    const target = messages.value
+      .flatMap((m) => m.evidence || [])
+      .find((e) => e.docId === docId && e.seq === seq);
+    if (target) target.text = updated.text;
+    messages.value.push({ role: 'assistant', content: `已修正 文档#${docId} 片段${seq + 1}，下次问答将按新内容检索。` });
+    emit('changed');
+    cancelEdit();
+  } catch (err) {
+    messages.value.push({ role: 'assistant', content: `修正失败：${err.message}` });
+  } finally {
+    saving.value = false;
     await scrollBottom();
   }
 }
@@ -101,8 +138,16 @@ function autoGrow(e) {
               <div class="ev-title">
                 #{{ e.docId }}《{{ e.title }}》片段{{ e.seq + 1 }}
                 <span v-if="e.jevScore != null" class="ev-score">JEV {{ e.jevScore }}/10</span>
+                <button class="ev-edit" @click.stop="startEdit(e)">修正</button>
               </div>
-              <div class="ev-text">{{ e.text.slice(0, 240) }}…</div>
+              <div v-if="editing && editing.docId === e.docId && editing.seq === e.seq" class="ev-editor">
+                <textarea v-model="editText" rows="4" />
+                <div class="ev-actions">
+                  <button :disabled="saving || !editText.trim()" @click="saveEdit">保存</button>
+                  <button :disabled="saving" @click="cancelEdit">取消</button>
+                </div>
+              </div>
+              <div v-else class="ev-text">{{ e.text.slice(0, 240) }}…</div>
             </div>
           </details>
         </div>
@@ -188,6 +233,23 @@ function autoGrow(e) {
 .ev-item { margin: 6px 0; padding: 8px 10px; background: var(--bg-elev); border-radius: 8px; }
 .ev-title { font-weight: 600; color: var(--text-2); }
 .ev-score { margin-left: 6px; color: var(--green); font-weight: 400; }
+.ev-edit {
+  margin-left: 8px; border: none; background: transparent; color: var(--primary);
+  font-size: 12px; cursor: pointer; padding: 0 2px;
+}
+.ev-editor { margin-top: 6px; }
+.ev-editor textarea {
+  width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 12.5px;
+  line-height: 1.6; color: var(--text); background: var(--bg-input);
+  border: 1px solid var(--border-strong); border-radius: 6px; padding: 6px 8px;
+}
+.ev-actions { display: flex; gap: 6px; margin-top: 6px; }
+.ev-actions button {
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--text-2);
+  border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+}
+.ev-actions button:first-child { background: var(--primary); border-color: var(--primary); color: #fff; }
+.ev-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ev-text { color: var(--text-3); margin-top: 2px; }
 .composer-wrap { padding: 0 20px 18px; }
 .composer {

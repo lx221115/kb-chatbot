@@ -85,8 +85,20 @@ check('notifications/initialized 返回 202', (await notify('notifications/initi
 
 const list = await rpc('tools/list', {});
 const names = list.json?.result?.tools?.map((t) => t.name) || [];
-check('tools/list 含 9 个工具', names.length === 9, names.join(','));
-for (const n of ['kb_add_text', 'kb_add_url', 'kb_add_file', 'kb_list_documents', 'kb_get_document', 'kb_update_document', 'kb_delete_document', 'kb_search', 'kb_chat']) {
+check('tools/list 含 11 个工具', names.length === 11, names.join(','));
+for (const n of [
+  'kb_add_text',
+  'kb_add_url',
+  'kb_add_file',
+  'kb_list_documents',
+  'kb_get_document',
+  'kb_update_document',
+  'kb_update_chunk',
+  'kb_replace_text',
+  'kb_delete_document',
+  'kb_search',
+  'kb_chat'
+]) {
   check(`工具存在 ${n}`, names.includes(n));
 }
 
@@ -122,6 +134,53 @@ check('kb_update_document 仅改标题', !renamed.isError && renamed.json?.title
 const rewritten = await callTool('kb_update_document', { id: docId, content: '完全新的内容：光子计算标记 Pp3k。' });
 check('kb_update_document 改内容', !rewritten.isError && rewritten.json?.chunkCount > 0, rewritten.text.slice(0, 200));
 
+// 精准修正
+const stamp = `m${Date.now()}`;
+const oldAddr = `http://old-${stamp}.example.com`;
+const newAddr = `https://new-${stamp}.example.com`;
+const chunkDoc = await callTool('kb_add_text', { title: `MCP 精准修正-${stamp}`, content: `OA 地址：${oldAddr}。负责人：张三。` });
+check('kb_add_text 精准修正文档', !chunkDoc.isError && chunkDoc.json?.id > 0, chunkDoc.text.slice(0, 200));
+const chunkDocId = chunkDoc.json?.id;
+
+const replaced = await callTool('kb_replace_text', { oldValue: oldAddr, newValue: newAddr });
+check(
+  'kb_replace_text 全库唯一命中',
+  !replaced.isError && replaced.json?.status === 'ok' && replaced.json?.occurrences === 1,
+  replaced.text.slice(0, 200)
+);
+const gotChunk = await callTool('kb_get_document', { id: chunkDocId });
+check('替换后片段含新地址', gotChunk.json?.chunks?.[0]?.includes(newAddr), gotChunk.text.slice(0, 200));
+
+const updatedChunk = await callTool('kb_update_chunk', {
+  docId: chunkDocId,
+  seq: 1,
+  text: `OA 地址：${newAddr}。负责人：李四。`
+});
+check('kb_update_chunk 整段替换', !updatedChunk.isError && updatedChunk.json?.text?.includes('李四'), updatedChunk.text.slice(0, 200));
+
+const searchedNew = await callTool('kb_search', { query: newAddr });
+check(
+  'kb_update_chunk 后检索立即生效',
+  Array.isArray(searchedNew.json) && searchedNew.json.some((r) => r.text.includes(newAddr)),
+  searchedNew.text.slice(0, 200)
+);
+
+const ambDoc = await callTool('kb_add_text', { title: `MCP 多候选-${stamp}`, content: `共享标记 ${stamp} 再次出现。` });
+const ambRes = await callTool('kb_replace_text', { oldValue: stamp, newValue: `x-${stamp}` });
+check(
+  'kb_replace_text 多命中返回候选',
+  !ambRes.isError && ambRes.json?.status === 'ambiguous' && ambRes.json?.candidates?.length >= 2,
+  ambRes.text.slice(0, 200)
+);
+const atRes = await callTool('kb_replace_text', {
+  docId: chunkDocId,
+  seq: 1,
+  oldValue: stamp,
+  newValue: `y-${stamp}`
+});
+check('kb_replace_text 指定片段替换', !atRes.isError && atRes.json?.status === 'ok', atRes.text.slice(0, 200));
+const ambId = ambDoc.json?.id;
+
 // 错误处理
 const notFound = await callTool('kb_get_document', { id: 999999 });
 check('不存在文档返回 isError', notFound.isError && notFound.text.includes('不存在'), notFound.text.slice(0, 120));
@@ -131,6 +190,9 @@ const del1 = await callTool('kb_delete_document', { id: docId });
 check('kb_delete_document', !del1.isError && del1.json?.ok === true, del1.text.slice(0, 120));
 const del2 = await callTool('kb_delete_document', { id: fileId });
 check('kb_delete_document 清理文件文档', !del2.isError, del2.text.slice(0, 120));
+const del3 = await callTool('kb_delete_document', { id: chunkDocId });
+const del4 = await callTool('kb_delete_document', { id: ambId });
+check('清理精准修正测试文档', !del3.isError && !del4.isError, `${del3.text.slice(0, 60)} ${del4.text.slice(0, 60)}`);
 
 const after = await callTool('kb_list_documents', {});
 check('删除后列表不含测试文档', !after.json.some((d) => d.id === docId || d.id === fileId));

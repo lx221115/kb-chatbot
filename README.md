@@ -22,9 +22,10 @@
 - **历史会话**：左侧栏列出全部会话，点击恢复上下文，可新建/删除；标题取自首条消息
 - **模型设置**：每用户独立配置，支持 **OpenAI 兼容协议**（DeepSeek / OpenAI / 通义 / Moonshot / Ollama…）与 **Anthropic Messages 协议**，含快捷预设；未配置时服务端 .env 的 `LLM_API_KEY` 作为兜底
 - **知识库管理**：右侧抽屉，文档列表/详情/删除 + 文本/链接入库；聊天输入框上方工具栏可直接上传文件
+- **精准修正**：按旧值或上一轮回答引用的片段定位，只改命中片段并立即重建该片段索引，无需整篇替换；聊天证据卡片也可直接编辑
 - **会话内指令**：见下表
 - **MCP 对外暴露**：知识库增删改查/检索/问答可通过 MCP 服务器被其他 agent 调用，见下文
-- **运行日志**：`server/logger.js` 无依赖记录运行日志，输出到项目根 `logs/app-YYYY-MM-DD.log`，按天自动切分文件
+- **运行日志**：`server/lib/logger.js` 无依赖记录运行日志，输出到项目根 `logs/app-YYYY-MM-DD.log`，按天自动切分文件
 - **降级可用**：未配置模型密钥时，指令与检索仍完全可用，仅生成回答提示配置
 
 ### 会话内指令
@@ -33,13 +34,17 @@
 |---|---|
 | `/添加知识库 <内容>` | 文本入库 |
 | `/添加知识库 url:<网址>` | 抓取网页正文入库（支持公众号等常见站点） |
-| `/更新知识库 <文档ID>|<新内容>` | 整篇替换 |
+| `/修正知识库 <旧值> => <新值>` | 全库按子串定位，唯一命中时只替换该片段；多命中返回候选 |
+| `/修正知识库 <文档ID>:<片段> => <旧值> => <新值>` | 指定片段内替换旧值（片段序号从 1 开始） |
+| `/修正知识库 <文档ID>:<片段>\|<新内容>` | 指定片段整段替换，不重新分块 |
+| `/修正知识库 <修改要求>` | 基于上一轮回答引用的片段，由模型精准改写（需配置模型） |
+| `/更新知识库 <文档ID>\|<新内容>` | 整篇替换并重新分块（兼容旧用法） |
 | `/删除知识库 <文档ID>` | 删除文档及全部片段 |
-| `/查询知识库 <关键词>` | 只检索不生成，展示匹配片段 |
+| `/查询知识库 <关键词>` | 只检索不生成，展示匹配片段与序号 |
 | `/知识库列表` | 列出全部文档 |
 | `/帮助` | 指令帮助 |
 
-支持别名：`/新增知识库`、`/修改知识库`、`/搜索知识库` 等。
+支持别名：`/新增知识库`、`/修改知识库`、`/搜索知识库`、`/纠正知识库` 等。片段级修改会保留片段 ID 与序号，只重建该片段的 FTS 行，下一轮检索立即命中新内容。
 
 ## 快速开始
 
@@ -58,15 +63,16 @@ pnpm build && pnpm start   # 生产模式：Express 直接托管 web/dist
 - `GET|PUT /api/settings` — 当前用户的模型配置（读回时密钥掩码）
 - `GET|POST /api/conversations`、`GET|PUT|DELETE /api/conversations/:id`
 - `GET|POST /api/documents`、`GET|PUT|DELETE /api/documents/:id` — 知识库 CRUD（按用户隔离）
+- `PATCH /api/documents/:id/chunks/:seq` — 片段级修正：`{text}` 整段替换，或 `{oldValue,newValue}` 子串替换；`seq` 从 1 开始
 - `GET /api/search?q=` — 纯 BM25 检索
 - `POST /api/chat {message, conversationId?}` — 对话入口：`/` 开头走指令，否则 SAG2 检索 + JEV + 生成；自动创建/续写会话并落库
 - 除 `/api/health` 与认证接口外均需 `Authorization: Bearer <token>`
 
 ## MCP 对外暴露（供其他 agent 调用）
 
-MCP 与 Chat 服务是**同一个进程、同一个端口**：`POST /api/mcp` 是 Streamable HTTP（无状态）端点，随服务启动自动可用，不需要单独运行 MCP 进程。它把知识库增删改查/检索/问答封装为 9 个工具，供任意 MCP 客户端（Qoder、Claude Desktop 等）调用，复用同一套 Bearer 鉴权，数据按登录用户隔离。
+MCP 与 Chat 服务是**同一个进程、同一个端口**：`POST /api/mcp` 是 Streamable HTTP（无状态）端点，随服务启动自动可用，不需要单独运行 MCP 进程。它把知识库增删改查/检索/问答封装为 11 个工具，供任意 MCP 客户端（Qoder、Claude Desktop 等）调用，复用同一套 Bearer 鉴权，数据按登录用户隔离。其中 `kb_update_chunk` 与 `kb_replace_text` 提供片段级精准修正，不会重新分块。
 
-工具：`kb_add_text`、`kb_add_file`、`kb_add_url`、`kb_list_documents`、`kb_get_document`、`kb_update_document`、`kb_delete_document`、`kb_search`、`kb_chat`。
+工具：`kb_add_text`、`kb_add_file`、`kb_add_url`、`kb_list_documents`、`kb_get_document`、`kb_update_document`、`kb_update_chunk`、`kb_replace_text`、`kb_delete_document`、`kb_search`、`kb_chat`。
 
 先用账号换取 token：
 
@@ -127,10 +133,11 @@ server/
     conversations.js 会话与消息数据访问
     chat.js         对话轮核心逻辑（指令 / SAG2 检索 + JEV + 生成）
     commands.js     会话内斜杠指令
-    ingest.js       分块与知识库 CRUD（按 owner 隔离）
+    ingest.js       分块、知识库 CRUD 与片段级索引重建（按 owner 隔离）
+    corrections.js  精准修正：旧值定位、多候选处理、基于会话证据的模型改写
     retrieve.js     SAG2：BM25 多跳 + JEV 验证
     llm.js          OpenAI 兼容 / Anthropic 双协议客户端 + 用户级配置
-    mcpServer.js    创建绑定当前用户的 MCP 服务器（9 个知识库工具）
+    mcpServer.js    创建绑定当前用户的 MCP 服务器（11 个知识库工具）
   routes/         按资源拆分的路由
     auth.js         注册/登录/登出/当前用户
     settings.js     模型配置

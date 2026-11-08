@@ -46,6 +46,17 @@ export function getHistory(conversationId, limit = 10) {
     .reverse();
 }
 
+export function getRecentEvidence(conversationId) {
+  const row = db
+    .prepare(
+      `SELECT evidence FROM messages
+       WHERE conversation_id=? AND role='assistant' AND evidence IS NOT NULL
+       ORDER BY id DESC LIMIT 1`
+    )
+    .get(conversationId);
+  return row ? JSON.parse(row.evidence) : [];
+}
+
 export function addMessage(conversationId, role, content, evidence = null) {
   db.prepare('INSERT INTO messages(conversation_id, role, content, evidence) VALUES (?,?,?,?)').run(
     conversationId,
