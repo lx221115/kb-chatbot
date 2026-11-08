@@ -148,7 +148,7 @@ export function createMcpServer(userId) {
 
   server.tool(
     'kb_chat',
-    '向知识库机器人提问：内部执行 SAG2 多跳检索 + JEV 证据验证 + LLM 生成回答；以 / 开头的消息会被当作知识库指令执行（如 /知识库列表、/帮助）',
+    '向知识库机器人提问：内部执行 SAG2 多跳检索 + JEV 证据验证 + LLM 生成回答；未配置模型时直接返回检索片段；以 / 开头的消息会被当作知识库指令执行（如 /知识库列表、/帮助）',
     {
       message: z.string().describe('问题或斜杠指令'),
       conversationId: z.number().describe('会话 id（可选，缺省则新建会话）').optional()

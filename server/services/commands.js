@@ -20,7 +20,7 @@ export const HELP_TEXT = `可用指令（在聊天框输入，也可点击输入
 - /帮助                        显示本帮助
 
 片段序号从 1 开始，/查询知识库 与回答证据中展示的片段号均可直接使用。
-不以 / 开头的消息将走 SAG2 检索（BM25 多跳 + JEV 验证）后由模型基于知识库回答。`;
+不以 / 开头的消息将走 SAG2 检索（BM25 多跳 + JEV 验证）后由模型基于知识库回答；未配置模型时自动降级为纯检索，直接返回命中的片段。`;
 
 function isUrlBody(body) {
   return /^url:\s*https?:\/\/\S+/i.test(body) || /^https?:\/\/\S+$/i.test(body);

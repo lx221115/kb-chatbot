@@ -76,7 +76,7 @@ async function save() {
         <input v-model="form.apiKey" type="password" placeholder="留空则保持原密钥不变（保存时）" />
         <div v-if="info.hasKey" class="note">当前密钥：{{ info.maskedKey }}</div>
         <div v-else-if="info.envFallback" class="note">当前使用服务端 .env 中的密钥</div>
-        <div v-else class="note warn">尚未配置密钥，聊天生成不可用（指令与检索仍可用）</div>
+        <div v-else class="note warn">尚未配置密钥，聊天将降级为纯检索（直接返回命中片段，不做整合生成）</div>
       </div>
       <div class="row">
         <label>模型名</label>
