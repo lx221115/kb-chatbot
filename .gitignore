@@ -1,0 +1,24 @@
+# 依赖
+node_modules/
+
+# 环境变量（含密钥，仅保留 .env.example）
+.env
+.env.local
+
+# 运行时数据库与产物
+data/
+
+# 前端构建产物
+web/dist/
+dist/
+
+# 日志
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
