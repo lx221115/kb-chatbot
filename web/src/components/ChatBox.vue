@@ -8,6 +8,7 @@ const emit = defineEmits(['created', 'changed', 'open-kb']);
 const messages = ref([]);
 const input = ref('');
 const busy = ref(false);
+const uploading = ref(false);
 const listRef = ref(null);
 const fileRef = ref(null);
 const editing = ref(null);
@@ -96,14 +97,15 @@ function onKeydown(e) {
 async function onFile(e) {
   const file = e.target.files?.[0];
   if (!file) return;
+  uploading.value = true;
   try {
-    const content = await file.text();
-    const doc = await api.addFile(file.name, content);
+    const doc = await api.uploadDoc(file);
     messages.value.push({ role: 'assistant', content: `文件《${file.name}》已加入知识库（文档 #${doc.id}，${doc.chunkCount} 个片段）。` });
     emit('changed');
   } catch (err) {
     messages.value.push({ role: 'assistant', content: `文件入库失败：${err.message}` });
   } finally {
+    uploading.value = false;
     e.target.value = '';
     await scrollBottom();
   }
@@ -161,9 +163,9 @@ function autoGrow(e) {
     <div class="composer-wrap">
       <div class="composer">
         <div class="toolbar">
-          <button class="tool" title="上传文件（.txt/.md/.csv/.json/.log）" @click="fileRef.click()">
+          <button class="tool" :disabled="uploading" title="上传文件（Word / Excel / PPT / PDF / 文本，≤30MB）" @click="fileRef.click()">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
-            文件
+            {{ uploading ? '解析中…' : '文件' }}
           </button>
           <button class="tool" title="抓取网页加入知识库" @click="emit('open-kb', 'url')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -194,7 +196,7 @@ function autoGrow(e) {
           </button>
         </div>
       </div>
-      <input ref="fileRef" type="file" accept=".txt,.md,.markdown,.csv,.log,.json" hidden @change="onFile" />
+      <input ref="fileRef" type="file" accept=".txt,.md,.markdown,.csv,.log,.json,.docx,.xlsx,.xls,.pptx,.pdf" hidden @change="onFile" />
     </div>
   </div>
 </template>
@@ -258,6 +260,7 @@ function autoGrow(e) {
   padding: 5px 9px; border-radius: 8px; font-size: 12.5px; color: var(--text-3); cursor: pointer;
 }
 .tool:hover { background: var(--bg-hover); color: var(--text); }
+.tool:disabled { opacity: .5; cursor: not-allowed; }
 .hint { margin-left: auto; font-size: 11.5px; color: var(--text-faint); }
 .composer textarea {
   width: 100%; border: none; outline: none; resize: none; font: inherit; font-size: 14.5px;

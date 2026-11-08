@@ -12,9 +12,14 @@ export function clearToken() {
 
 async function request(url, options = {}) {
   const token = getToken();
+  const isFormData = options.body instanceof FormData;
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    ...options
+    ...options,
+    headers: {
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    }
   });
   if (res.status === 401) {
     clearToken();
@@ -53,6 +58,12 @@ export const api = {
   addUrl: (url) => request('/api/documents', { method: 'POST', body: JSON.stringify({ type: 'url', url }) }),
   addFile: (filename, content) =>
     request('/api/documents', { method: 'POST', body: JSON.stringify({ type: 'file', filename, content }) }),
+  uploadDoc: (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('filename', file.name);
+    return request('/api/documents/upload', { method: 'POST', body: form });
+  },
   deleteDoc: (id) => request(`/api/documents/${id}`, { method: 'DELETE' }),
   updateChunk: (docId, seq, text) =>
     request(`/api/documents/${docId}/chunks/${seq}`, { method: 'PATCH', body: JSON.stringify({ text }) })

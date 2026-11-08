@@ -5,8 +5,8 @@ import { api } from '../api.js';
 const props = defineProps({ initialTab: { type: String, default: 'list' } });
 const emit = defineEmits(['close']);
 
-const tab = ref(props.initialTab === 'url' || props.initialTab === 'text' ? props.initialTab : 'list');
-watch(() => props.initialTab, (t) => { if (t === 'url' || t === 'text') tab.value = t; });
+const tab = ref(['url', 'text', 'file'].includes(props.initialTab) ? props.initialTab : 'list');
+watch(() => props.initialTab, (t) => { if (['url', 'text', 'file'].includes(t)) tab.value = t; });
 
 const docs = ref([]);
 const title = ref('');
@@ -14,6 +14,9 @@ const textContent = ref('');
 const url = ref('');
 const status = ref('');
 const busy = ref(false);
+const fileRef = ref(null);
+const pickedFile = ref(null);
+const uploading = ref(false);
 const expanded = ref(null);
 const detail = ref(null);
 
@@ -44,6 +47,27 @@ async function ingest() {
   }
 }
 
+function pickFile(e) {
+  pickedFile.value = e.target.files?.[0] || null;
+}
+
+async function uploadPicked() {
+  if (!pickedFile.value || uploading.value) return;
+  uploading.value = true;
+  status.value = '';
+  try {
+    const doc = await api.uploadDoc(pickedFile.value);
+    status.value = `已入库：#${doc.id}《${doc.title}》${doc.chunkCount} 片段（${doc.format.toUpperCase()}，${doc.chars} 字）`;
+    pickedFile.value = null;
+    if (fileRef.value) fileRef.value.value = '';
+    await refresh();
+  } catch (err) {
+    status.value = err.message;
+  } finally {
+    uploading.value = false;
+  }
+}
+
 async function toggleDetail(id) {
   if (expanded.value === id) { expanded.value = null; return; }
   expanded.value = id;
@@ -68,11 +92,28 @@ async function remove(id) {
 
       <div class="tabs">
         <button :class="{ on: tab === 'list' }" @click="tab = 'list'">文档（{{ docs.length }}）</button>
+        <button :class="{ on: tab === 'file' }" @click="tab = 'file'">上传文件</button>
         <button :class="{ on: tab === 'text' }" @click="tab = 'text'">添加文本</button>
         <button :class="{ on: tab === 'url' }" @click="tab = 'url'">添加链接</button>
       </div>
 
-      <div v-if="tab === 'text'" class="form">
+      <div v-if="tab === 'file'" class="form">
+        <input
+          ref="fileRef"
+          type="file"
+          accept=".txt,.md,.markdown,.csv,.log,.json,.docx,.xlsx,.xls,.pptx,.pdf"
+          hidden
+          @change="pickFile"
+        />
+        <button class="pick" @click="fileRef.click()">
+          {{ pickedFile ? pickedFile.name : '选择文件…' }}
+        </button>
+        <button class="primary" :disabled="!pickedFile || uploading" @click="uploadPicked">
+          {{ uploading ? '解析并入库中…' : '上传并加入知识库' }}
+        </button>
+        <p class="tip">支持 Word（.docx）、Excel（.xlsx/.xls）、PPT（.pptx）、PDF，以及 .txt/.md/.csv/.json/.log，单个文件 ≤ 30MB。</p>
+      </div>
+      <div v-else-if="tab === 'text'" class="form">
         <input v-model="title" placeholder="标题（可选）" />
         <textarea v-model="textContent" rows="8" placeholder="粘贴知识内容…" />
         <button class="primary" :disabled="busy" @click="ingest">{{ busy ? '处理中…' : '加入知识库' }}</button>
@@ -117,6 +158,9 @@ input:focus, textarea:focus { border-color: var(--primary); }
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
 .primary { padding: 9px; border: none; border-radius: 10px; background: var(--primary); color: #fff; font-size: 13.5px; cursor: pointer; }
 .primary:disabled { opacity: .6; }
+.pick { padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: 10px; background: var(--bg-elev); color: var(--text-3); font-size: 13px; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick:hover { border-color: var(--primary); color: var(--primary); }
+.tip { margin: 0; font-size: 11.5px; line-height: 1.6; color: var(--text-muted); }
 .status { font-size: 12.5px; color: var(--green); margin-bottom: 10px; }
 .docs { display: flex; flex-direction: column; gap: 8px; }
 .doc { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }

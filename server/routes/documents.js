@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   addDocument,
   deleteDocument,
@@ -8,10 +9,21 @@ import {
   updateChunk,
   updateDocument
 } from '../services/ingest.js';
+import {
+  MAX_UPLOAD_BYTES,
+  extractDocumentText,
+  normalizeFilename,
+  restoreFilename
+} from '../services/documentText.js';
 import { asyncHandler } from '../middleware/errors.js';
 import { fetchUrl } from '../lib/urlfetch.js';
 
 const router = Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 }
+});
 
 router.get('/', (req, res) => {
   res.json(listDocuments(req.userId));
@@ -44,6 +56,33 @@ router.post('/', asyncHandler(async (req, res) => {
     })
   );
 }));
+
+// 文件上传：服务端解析 docx/xlsx/xls/pptx/pdf 与纯文本类，提取正文后入库
+router.post(
+  '/upload',
+  (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+      if (!err) return next();
+      const message = err.code === 'LIMIT_FILE_SIZE'
+        ? `文件超过 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB 上限`
+        : `文件上传失败：${err.message}`;
+      res.status(400).json({ error: message });
+    });
+  },
+  asyncHandler(async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: '缺少文件字段 file' });
+    const filename = normalizeFilename(req.body?.filename || restoreFilename(req.file.originalname));
+    const { text, format } = await extractDocumentText(req.file.buffer, filename);
+    const doc = addDocument({
+      title: filename,
+      sourceType: 'file',
+      sourceRef: filename,
+      content: text,
+      ownerId: req.userId
+    });
+    res.json({ ...doc, format, chars: text.length });
+  })
+);
 
 router.put('/:id', (req, res) => {
   const doc = updateDocument(Number(req.params.id), req.body || {}, req.userId);

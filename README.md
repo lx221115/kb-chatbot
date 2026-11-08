@@ -21,7 +21,7 @@
 - **深色模式**：CSS 变量主题，登录页与侧栏均有切换按钮；首次跟随系统偏好，之后记忆于 localStorage（`kb_theme`）
 - **历史会话**：左侧栏列出全部会话，点击恢复上下文，可新建/删除；标题取自首条消息
 - **模型设置**：每用户独立配置，支持 **OpenAI 兼容协议**（DeepSeek / OpenAI / 通义 / Moonshot / Ollama…）与 **Anthropic Messages 协议**，含快捷预设；未配置时服务端 .env 的 `LLM_API_KEY` 作为兜底
-- **知识库管理**：右侧抽屉，文档列表/详情/删除 + 文本/链接入库；聊天输入框上方工具栏可直接上传文件
+- **知识库管理**：右侧抽屉，文档列表/详情/删除 + 文本/链接/文件入库；支持 Word、Excel、PPT、PDF 与纯文本类文件，聊天输入框上方工具栏可直接上传
 - **精准修正**：按旧值或上一轮回答引用的片段定位，只改命中片段并立即重建该片段索引，无需整篇替换；聊天证据卡片也可直接编辑
 - **会话内指令**：见下表
 - **MCP 对外暴露**：知识库增删改查/检索/问答可通过 MCP 服务器被其他 agent 调用，见下文
@@ -155,6 +155,7 @@ server/
     chat.js         对话轮核心逻辑（指令 / SAG2 检索 + JEV + 生成）
     commands.js     会话内斜杠指令
     ingest.js       分块、知识库 CRUD 与片段级索引重建（按 owner 隔离）
+    documentText.js 上传文件文本提取（docx/xlsx/xls/pptx/pdf/纯文本）
     corrections.js  精准修正：旧值定位、多候选处理、基于会话证据的模型改写
     retrieve.js     SAG2：BM25 多跳 + JEV 验证
     llm.js          OpenAI 兼容 / Anthropic 双协议客户端 + 用户级配置
@@ -163,7 +164,7 @@ server/
     auth.js         注册/登录/登出/当前用户
     settings.js     模型配置
     conversations.js 会话 CRUD
-    documents.js    知识库 CRUD（文本/文件/URL 入库）
+    documents.js    知识库 CRUD（文本/文件/URL 入库、多格式文件上传解析）
     search.js       纯 BM25 检索
     chat.js         对话入口（指令 / SAG2 检索 + JEV + 生成）
   middleware/
@@ -180,5 +181,5 @@ logs/              运行日志 app-YYYY-MM-DD.log（gitignore）
 
 ## 说明
 
-- 文件上传支持纯文本类（.txt/.md/.csv/.json/.log），前端读取文本后走同一入库管线
+- 文件上传由服务端解析后入库：Word（.docx）、Excel（.xlsx/.xls）、PPT（.pptx）、PDF，以及纯文本类（.txt/.md/.markdown/.csv/.json/.log），单个文件上限 30MB；旧版二进制 .doc/.ppt 需另存为新格式。扫描版 PDF 无文本层，暂不支持 OCR
 - API Key 以明文存于本地 SQLite（单机个人应用）；如需共享部署请自行加加密层
