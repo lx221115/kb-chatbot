@@ -1,7 +1,8 @@
+import { logger } from '../lib/logger.js';
+import { userMeta } from '../lib/userMeta.js';
 import { HELP_TEXT, isCommand, runCommand } from './commands.js';
 import { addMessage, conversationOwned, createConversation, getHistory, touchConversation } from './conversations.js';
 import { chatCompletion, getLlmConfig, llmConfigured } from './llm.js';
-import { logger } from './logger.js';
 import { retrieve } from './retrieve.js';
 
 // 执行一轮对话：指令直接执行，否则 SAG2 检索 + JEV 后由模型生成
@@ -44,11 +45,11 @@ export async function runChatTurn(userId, message, conversationId) {
           ...history,
           { role: 'user', content: message }
         ];
-        reply = await chatCompletion(messages, { temperature: 0.4 }, cfg);
+        reply = await chatCompletion(messages, { temperature: 0.4, userId }, cfg);
       }
     }
   } catch (err) {
-    logger.error('chat', 'turn failed', { userId, conversationId: convId, error: err.message });
+    logger.error('chat', 'turn failed', { ...userMeta(userId), conversationId: convId, error: err.message });
     touchConversation(convId);
     err.conversationId = convId;
     throw err;
@@ -56,7 +57,7 @@ export async function runChatTurn(userId, message, conversationId) {
 
   addMessage(convId, 'assistant', reply, evidence.length ? evidence : null);
   touchConversation(convId);
-  logger.info('chat', 'turn ok', { userId, conversationId: convId, type, evidence: evidence.length });
+  logger.info('chat', 'turn ok', { ...userMeta(userId), conversationId: convId, type, evidence: evidence.length });
 
   return { type, reply, evidence, conversationId: convId };
 }

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { searchOnly } from '../retrieve.js';
+import { searchOnly } from '../services/retrieve.js';
 
 const router = Router();
 

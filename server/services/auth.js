@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { db } from './db.js';
-import { logger } from './logger.js';
+import { db } from '../lib/db.js';
+import { logger } from '../lib/logger.js';
 
 function hash(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString('hex');
@@ -44,17 +44,24 @@ function createSession(userId) {
 }
 
 export function logout(token) {
-  const session = db.prepare('SELECT user_id FROM sessions WHERE token=?').get(token);
+  const session = db
+    .prepare('SELECT s.user_id, u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?')
+    .get(token);
   db.prepare('DELETE FROM sessions WHERE token=?').run(token);
-  if (session) logger.info('auth', 'user logged out', { userId: session.user_id });
+  if (session) logger.info('auth', 'user logged out', { userId: session.user_id, username: session.username });
 }
 
 export function authMiddleware(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const session = token ? db.prepare('SELECT * FROM sessions WHERE token=?').get(token) : null;
+  const session = token
+    ? db
+        .prepare('SELECT s.user_id, u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=?')
+        .get(token)
+    : null;
   if (!session) return res.status(401).json({ error: '未登录或登录已失效' });
   req.userId = session.user_id;
+  req.username = session.username;
   req.token = token;
   next();
 }

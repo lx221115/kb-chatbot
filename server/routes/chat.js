@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { runChatTurn } from '../chat.js';
+import { runChatTurn } from '../services/chat.js';
 
 const router = Router();
 

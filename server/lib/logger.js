@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // 日志目录固定为项目根 logs/（基于本模块位置解析，不受进程 cwd 影响）
-const LOG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'logs');
+const LOG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'logs');
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 const MIN_LEVEL = LEVELS[(process.env.LOG_LEVEL || 'info').toLowerCase()] ?? 20;
 

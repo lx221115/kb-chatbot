@@ -1,6 +1,6 @@
-import { db } from './db.js';
+import { db } from '../lib/db.js';
+import { contentTokens, orExpr, tokenize } from '../lib/tokenizer.js';
 import { chatCompletion, llmConfigured } from './llm.js';
-import { contentTokens, orExpr, tokenize } from './tokenizer.js';
 
 function bm25Search(matchExpr, limit, ownerId) {
   if (!matchExpr) return [];
@@ -36,7 +36,7 @@ function extractExpansionTerms(passages, max = 8) {
     .map(([t]) => t);
 }
 
-async function jevValidate(query, candidates, cfg) {
+async function jevValidate(query, candidates, cfg, ownerId) {
   if (!llmConfigured(cfg) || candidates.length <= 1) return candidates.slice(0, 6);
   const listing = candidates
     .map((c, i) => `【片段${i + 1}】(来源: ${c.title})\n${c.text.slice(0, 600)}`)
@@ -52,7 +52,7 @@ async function jevValidate(query, candidates, cfg) {
     { role: 'user', content: `问题：${query}\n\n候选证据：\n${listing}` }
   ];
   try {
-    const raw = await chatCompletion(prompt, { json: true, temperature: 0 }, cfg);
+    const raw = await chatCompletion(prompt, { json: true, temperature: 0, userId: ownerId }, cfg);
     const parsed = JSON.parse(raw.replace(/```(?:json)?|```/g, '').trim());
     const byId = new Map((parsed.results || []).map((r) => [r.id, r]));
     const scored = candidates
@@ -83,7 +83,7 @@ export async function retrieve(query, cfg, ownerId) {
   }
 
   const candidates = [...merged.values()].sort((a, b) => a.score - b.score).slice(0, 12);
-  const validated = await jevValidate(query, candidates, cfg);
+  const validated = await jevValidate(query, candidates, cfg, ownerId);
   return validated.map((v) => ({
     docId: v.doc_id,
     title: v.title,

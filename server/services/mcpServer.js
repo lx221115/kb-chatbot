@@ -1,32 +1,34 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { logger } from '../lib/logger.js';
+import { userMeta } from '../lib/userMeta.js';
+import { fetchUrl } from '../lib/urlfetch.js';
 import { runChatTurn } from './chat.js';
 import { addDocument, deleteDocument, getDocument, listDocuments, updateDocument } from './ingest.js';
-import { logger } from './logger.js';
 import { searchOnly } from './retrieve.js';
-import { fetchUrl } from './urlfetch.js';
 
 function ok(data) {
   return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
 }
 
-function handler(tool, fn) {
-  return async (args) => {
-    const started = Date.now();
-    try {
-      const data = await fn(args);
-      logger.info('mcp', `tool ${tool} ok`, { ms: Date.now() - started });
-      return ok(data);
-    } catch (err) {
-      logger.warn('mcp', `tool ${tool} failed`, { ms: Date.now() - started, error: err.message });
-      return { content: [{ type: 'text', text: `错误：${err.message}` }], isError: true };
-    }
-  };
-}
-
 // 每个请求创建一个绑定到当前登录用户的 MCP server（无状态，工具共享 Chat 服务的数据层）
 export function createMcpServer(userId) {
+  const user = userMeta(userId);
   const server = new McpServer({ name: 'kb-chatbot', version: '1.0.0' });
+
+  function handler(tool, fn) {
+    return async (args) => {
+      const started = Date.now();
+      try {
+        const data = await fn(args);
+        logger.info('mcp', `tool ${tool} ok`, { ...user, ms: Date.now() - started });
+        return ok(data);
+      } catch (err) {
+        logger.warn('mcp', `tool ${tool} failed`, { ...user, ms: Date.now() - started, error: err.message });
+        return { content: [{ type: 'text', text: `错误：${err.message}` }], isError: true };
+      }
+    };
+  }
 
   server.tool(
     'kb_add_text',

@@ -1,6 +1,7 @@
-import { db } from './db.js';
-import { contentTokens } from './tokenizer.js';
-import { logger } from './logger.js';
+import { db } from '../lib/db.js';
+import { logger } from '../lib/logger.js';
+import { contentTokens } from '../lib/tokenizer.js';
+import { getUsername } from '../lib/userMeta.js';
 
 const CHUNK_SIZE = 400;
 const CHUNK_OVERLAP = 60;
@@ -46,7 +47,7 @@ export function addDocument({ title, sourceType, sourceRef, content, ownerId }) 
     return lastInsertRowid;
   });
   const id = tx();
-  logger.info('kb', 'document added', { id, ownerId, sourceType, chunks: chunks.length, title: title.slice(0, 60) });
+  logger.info('kb', 'document added', { id, ownerId, username: getUsername(ownerId), sourceType, chunks: chunks.length, title: title.slice(0, 60) });
   return { id, title, chunkCount: chunks.length };
 }
 
@@ -61,7 +62,7 @@ export function updateDocument(id, { title, content }, ownerId) {
       );
     }
     const { chunkCount } = db.prepare('SELECT COUNT(*) AS chunkCount FROM chunks WHERE doc_id=?').get(id);
-    logger.info('kb', 'document renamed', { id, ownerId, title: (title ?? doc.title).slice(0, 60) });
+    logger.info('kb', 'document renamed', { id, ownerId, username: getUsername(ownerId), title: (title ?? doc.title).slice(0, 60) });
     return { id, title: title ?? doc.title, chunkCount };
   }
   const chunks = splitChunks(content);
@@ -76,7 +77,7 @@ export function updateDocument(id, { title, content }, ownerId) {
     insertChunks(id, chunks);
   });
   tx();
-  logger.info('kb', 'document reindexed', { id, ownerId, chunks: chunks.length });
+  logger.info('kb', 'document reindexed', { id, ownerId, username: getUsername(ownerId), chunks: chunks.length });
   return { id, title: title ?? doc.title, chunkCount: chunks.length };
 }
 
@@ -87,7 +88,7 @@ export function deleteDocument(id, ownerId) {
     return db.prepare('DELETE FROM documents WHERE id=? AND owner_id=?').run(id, ownerId).changes;
   });
   const changes = tx();
-  logger.info('kb', 'document deleted', { id, ownerId, deleted: changes > 0 });
+  logger.info('kb', 'document deleted', { id, ownerId, username: getUsername(ownerId), deleted: changes > 0 });
   return changes > 0;
 }
 

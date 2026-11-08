@@ -1,7 +1,8 @@
+import { logger } from '../lib/logger.js';
+import { userMeta } from '../lib/userMeta.js';
+import { fetchUrl } from '../lib/urlfetch.js';
 import { addDocument, deleteDocument, listDocuments, updateDocument } from './ingest.js';
 import { searchOnly } from './retrieve.js';
-import { fetchUrl } from './urlfetch.js';
-import { logger } from './logger.js';
 
 export const HELP_TEXT = `可用指令（在聊天框输入，也可点击输入框上方工具栏）：
 
@@ -89,7 +90,7 @@ export async function runCommand(message, userId) {
   const rawName = (spaceIdx === -1 ? text : text.slice(0, spaceIdx)).replace(/^\//, '');
   const body = spaceIdx === -1 ? '' : text.slice(spaceIdx + 1).trim();
   const action = ALIASES[rawName];
-  logger.info('command', `run /${rawName}`, { userId, action: action || 'unknown', bodyLen: body.length });
+  logger.info('command', `run /${rawName}`, { ...userMeta(userId), action: action || 'unknown', bodyLen: body.length });
   if (!action) return { reply: `未知指令 /${rawName}。输入 /帮助 查看全部指令。` };
   try {
     switch (action) {
@@ -101,7 +102,7 @@ export async function runCommand(message, userId) {
       case 'help': return { reply: HELP_TEXT };
     }
   } catch (err) {
-    logger.error('command', `run /${rawName} failed`, { userId, error: err.message });
+    logger.error('command', `run /${rawName} failed`, { ...userMeta(userId), error: err.message });
     return { reply: `指令执行失败：${err.message}` };
   }
 }

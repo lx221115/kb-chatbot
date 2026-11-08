@@ -1,4 +1,4 @@
-import { logger } from '../logger.js';
+import { logger } from '../lib/logger.js';
 
 export function accessLog(req, res, next) {
   const started = Date.now();
@@ -7,7 +7,8 @@ export function accessLog(req, res, next) {
     const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
     logger[level]('http', `${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms`, {
       ip: req.ip,
-      userId: req.userId ?? null
+      userId: req.userId ?? null,
+      username: req.username ?? null
     });
   });
   next();

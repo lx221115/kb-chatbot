@@ -102,9 +102,10 @@ curl -s http://localhost:3000/api/auth/login \
 
 ## 运行日志
 
-`server/logger.js` 是零依赖日志模块，输出到项目根目录 `logs/`，**按天拆分**为 `app-YYYY-MM-DD.log`（本地日期，跨天自动切换新文件，历史文件保留）。日志目录基于模块自身位置解析，进程从任意 cwd 启动都写到同一 `logs/`。
+`server/lib/logger.js` 是零依赖日志模块，输出到项目根目录 `logs/`，**按天拆分**为 `app-YYYY-MM-DD.log`（本地日期，跨天自动切换新文件，历史文件保留）。日志目录基于模块自身位置解析，进程从任意 cwd 启动都写到同一 `logs/`。
 
-- 记录范围：HTTP 访问（方法/路径/状态/耗时/IP/userId）、注册登录、知识库增删改、指令执行、LLM 调用耗时与错误、对话轮次、MCP 工具调用
+- 记录范围：HTTP 访问（方法/路径/状态/耗时/IP/用户 id 与用户名）、注册登录、知识库增删改、指令执行、LLM 调用耗时与错误、对话轮次、MCP 工具调用
+- 用户维度：请求经鉴权后统一记录 `userId` + `username`；服务层日志通过 `lib/userMeta.js` 补齐用户名（带缓存）
 - 级别：`DEBUG/INFO/WARN/ERROR`，通过环境变量 `LOG_LEVEL` 调整阈值，默认 `INFO`
 - 格式：`[本地时间] [级别] [作用域] 消息 {元数据}`
 - MCP 工具调用与 HTTP 请求写同一份日志（`[mcp]` 作用域），全部输出到文件并回显 stderr
@@ -114,7 +115,22 @@ curl -s http://localhost:3000/api/auth/login \
 
 ```
 server/
-  index.js        入口：中间件装配、路由挂载、静态资源、启动
+  index.js        唯一入口：中间件装配、路由挂载、MCP 端点、静态资源、启动
+  lib/            无业务依赖的基础模块
+    db.js           SQLite schema（users/sessions/settings/conversations/messages/documents/chunks/fts）
+    logger.js       运行日志（按天拆分写 logs/）
+    userMeta.js     userId → username 查询缓存（日志用）
+    tokenizer.js    中文 bigram + 英文词分词、停用词
+    urlfetch.js     网页正文抓取（cheerio）
+  services/       业务服务
+    auth.js         注册/登录/token 会话与鉴权中间件
+    conversations.js 会话与消息数据访问
+    chat.js         对话轮核心逻辑（指令 / SAG2 检索 + JEV + 生成）
+    commands.js     会话内斜杠指令
+    ingest.js       分块与知识库 CRUD（按 owner 隔离）
+    retrieve.js     SAG2：BM25 多跳 + JEV 验证
+    llm.js          OpenAI 兼容 / Anthropic 双协议客户端 + 用户级配置
+    mcpServer.js    创建绑定当前用户的 MCP 服务器（9 个知识库工具）
   routes/         按资源拆分的路由
     auth.js         注册/登录/登出/当前用户
     settings.js     模型配置
@@ -125,18 +141,6 @@ server/
   middleware/
     accessLog.js    HTTP 访问日志
     errors.js       asyncHandler、统一错误处理、API 404
-  conversations.js 会话与消息数据访问
-  chat.js          对话轮核心逻辑（指令 / SAG2 检索 + JEV + 生成）
-  mcpServer.js     创建绑定当前用户的 MCP 服务器（9 个知识库工具）
-  auth.js          注册/登录/token 会话与鉴权中间件
-  db.js            SQLite schema（users/sessions/settings/conversations/messages/documents/chunks/fts）
-  tokenizer.js     中文 bigram + 英文词分词、停用词
-  ingest.js        分块与知识库 CRUD（按 owner 隔离）
-  retrieve.js      SAG2：BM25 多跳 + JEV 验证
-  commands.js      会话内斜杠指令
-  llm.js           OpenAI 兼容 / Anthropic 双协议客户端 + 用户级配置
-  urlfetch.js      网页正文抓取（cheerio）
-  logger.js        运行日志（按天拆分写 logs/）
 web/               Vue3 + Vite 前端（登录页 / 侧栏历史 / 聊天区 / 设置弹窗 / 知识库抽屉；theme.js 深色模式）
 skills/            kb-management/SKILL.md（可复制到其他 agent 的知识库管理技能）
 scripts/           test-api.mjs（知识库流程）、test-auth.mjs（鉴权/会话/设置回归）、test-mcp.mjs（MCP 全流程回归）

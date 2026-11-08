@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { addDocument, deleteDocument, getDocument, listDocuments, updateDocument } from '../ingest.js';
+import { addDocument, deleteDocument, getDocument, listDocuments, updateDocument } from '../services/ingest.js';
 import { asyncHandler } from '../middleware/errors.js';
-import { fetchUrl } from '../urlfetch.js';
+import { fetchUrl } from '../lib/urlfetch.js';
 
 const router = Router();
 

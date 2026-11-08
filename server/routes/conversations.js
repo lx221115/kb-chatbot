@@ -5,7 +5,7 @@ import {
   getConversation,
   listConversations,
   renameConversation
-} from '../conversations.js';
+} from '../services/conversations.js';
 
 const router = Router();
 

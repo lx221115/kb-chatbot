@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getLlmConfig, llmConfigured, saveLlmConfig } from '../llm.js';
+import { getLlmConfig, llmConfigured, saveLlmConfig } from '../services/llm.js';
 
 const router = Router();
 

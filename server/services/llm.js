@@ -1,5 +1,6 @@
-import { db } from './db.js';
-import { logger } from './logger.js';
+import { db } from '../lib/db.js';
+import { logger } from '../lib/logger.js';
+import { userMeta } from '../lib/userMeta.js';
 
 const ENV_FALLBACK = {
   provider: 'openai',
@@ -86,17 +87,17 @@ async function callAnthropic(cfg, messages, { json, temperature }) {
 
 export async function chatCompletion(messages, opts = {}, cfg = ENV_FALLBACK) {
   if (!llmConfigured(cfg)) throw new Error('未配置模型密钥：请在「设置」中填写，或于服务端 .env 配置 LLM_API_KEY');
-  const { json = false, temperature = 0.3 } = opts;
+  const { json = false, temperature = 0.3, userId } = opts;
   const started = Date.now();
-  logger.info('llm', 'completion start', { provider: cfg.provider, model: cfg.model, messages: messages.length, json });
+  logger.info('llm', 'completion start', { ...userMeta(userId), provider: cfg.provider, model: cfg.model, messages: messages.length, json });
   try {
     const text = cfg.provider === 'anthropic'
       ? await callAnthropic(cfg, messages, { json, temperature })
       : await callOpenai(cfg, messages, { json, temperature });
-    logger.info('llm', 'completion done', { provider: cfg.provider, model: cfg.model, ms: Date.now() - started, chars: text.length });
+    logger.info('llm', 'completion done', { ...userMeta(userId), provider: cfg.provider, model: cfg.model, ms: Date.now() - started, chars: text.length });
     return text;
   } catch (err) {
-    logger.error('llm', 'completion failed', { provider: cfg.provider, model: cfg.model, ms: Date.now() - started, error: err.message });
+    logger.error('llm', 'completion failed', { ...userMeta(userId), provider: cfg.provider, model: cfg.model, ms: Date.now() - started, error: err.message });
     throw err;
   }
 }

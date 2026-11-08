@@ -6,9 +6,9 @@ import path from 'node:path';
 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-import { authMiddleware } from './auth.js';
-import { initLogger, logger } from './logger.js';
-import { createMcpServer } from './mcpServer.js';
+import { authMiddleware } from './services/auth.js';
+import { initLogger, logger } from './lib/logger.js';
+import { createMcpServer } from './services/mcpServer.js';
 import { accessLog } from './middleware/accessLog.js';
 import { apiNotFound, errorHandler } from './middleware/errors.js';
 import authRouter from './routes/auth.js';
