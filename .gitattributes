@@ -1,0 +1,6 @@
+# Shell 脚本在 Windows 检出时也保持 LF，否则 Linux 上会报 bad interpreter
+*.sh text eol=lf
+
+# Windows 批处理保持 CRLF，cmd 对纯 LF 的批处理兼容性不佳
+*.cmd text eol=crlf
+*.bat text eol=crlf

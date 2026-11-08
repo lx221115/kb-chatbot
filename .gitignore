@@ -5,6 +5,9 @@ node_modules/
 .env
 .env.local
 
+# 线上部署配置（含服务器地址，仅保留 deploy/remote.env.example）
+deploy/remote.env
+
 # 运行时数据库与产物
 data/
 

@@ -26,7 +26,7 @@
 - **会话内指令**：见下表
 - **MCP 对外暴露**：知识库增删改查/检索/问答可通过 MCP 服务器被其他 agent 调用，见下文
 - **运行日志**：`server/lib/logger.js` 无依赖记录运行日志，输出到项目根 `logs/app-YYYY-MM-DD.log`，按天自动切分文件
-- **降级可用**：未配置模型密钥时，指令与检索仍完全可用，仅生成回答提示配置
+- **降级可用**：未配置模型密钥时，普通提问自动降级为纯检索，直接返回 BM25 命中的片段及引用；指令与检索完全可用，仅整合生成需要模型
 
 ### 会话内指令
 
@@ -62,10 +62,12 @@ pnpm build && pnpm start   # 生产模式：Express 直接托管 web/dist
 ```bash
 docker build -t your-registry/kb-chatbot:0.1.0 .
 
-# 国内网络下 Debian/npm 源较慢时，可覆盖构建源（基础镜像仍需能访问 Docker Hub 或配置 registry-mirrors）
+# 构建默认使用国内 apt/npm 源与 better-sqlite3 预编译包；
+# 海外环境或自建镜像站时覆盖回官方源（基础镜像仍需能访问 Docker Hub 或配置 registry-mirrors）
 docker build \
-  --build-arg DEBIAN_MIRROR=mirrors.aliyun.com \
-  --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+  --build-arg DEBIAN_MIRROR=deb.debian.org \
+  --build-arg NPM_REGISTRY=https://registry.npmjs.org \
+  --build-arg SQLITE3_BINARY_MIRROR=https://github.com/WiseLibs/better-sqlite3/releases/download \
   -t your-registry/kb-chatbot:0.1.0 .
 
 docker run -d -p 3000:3000 \
@@ -75,6 +77,64 @@ docker run -d -p 3000:3000 \
 ```
 
 SQLite 文件默认放在 `./data`，可用 `DATA_DIR` 改到挂载卷（如 `/app/data`）。**必须持久化该目录**，否则容器/Pod 重建会丢失 `kb.db`。容器以 `node`（uid 1000）运行，bind mount 宿主机目录时需保证该目录对 1000 可写。
+
+### 重新部署
+
+**Windows 双击部署**：直接双击项目根目录的 `redeploy.cmd`，通过菜单选择「重新构建并部署 / 仅重建容器 / 修改部署参数 / 查看容器状态」，可交互设置镜像名、容器名、宿主机端口、数据卷、环境变量文件、构建源与是否拉取基础镜像。脚本依赖 Git for Windows 提供的 bash，内部调用下文的 `scripts/redeploy.sh`。脚本会优先使用 Git 安装目录下的 `bash.exe`，并跳过 WSL 自带的同名程序；如仍找不到，可设置环境变量 `BASH_EXE` 指向 Git Bash。
+
+**命令行部署**（Linux / macOS / Git Bash）：修改代码后，在项目根目录执行：
+
+```bash
+bash scripts/redeploy.sh
+```
+
+脚本会重新构建镜像，并复用旧容器的镜像名、宿主机端口、`/app/data` 数据卷、环境变量（含模型密钥）和重启策略来重建容器；数据卷始终保留。构建或健康检查失败会自动回滚到旧容器。
+
+常用参数：
+
+```bash
+bash scripts/redeploy.sh --no-build          # 不重新构建，仅用现有镜像重建容器
+bash scripts/redeploy.sh -i kb-chatbot:latest -p 8080 -v kb-chatbot-data
+bash scripts/redeploy.sh -e .env             # 额外传入环境变量文件
+bash scripts/redeploy.sh --pull              # 构建前拉取最新基础镜像
+
+# 默认已用国内镜像源；海外环境可覆盖回官方源
+DEBIAN_MIRROR=deb.debian.org NPM_REGISTRY=https://registry.npmjs.org \
+  bash scripts/redeploy.sh
+```
+
+脚本默认管理名为 `kb-chatbot` 的容器；首次部署（容器不存在）时使用 `kb-chatbot:latest` 镜像、`3000` 端口和 `kb-chatbot-data` 数据卷。若原容器有多个端口映射或自定义网络，脚本只保留 `3000/tcp` 映射与主网络，其余参数请用环境变量 `IMAGE`、`CONTAINER`、`HOST_PORT`、`VOLUME` 或命令行参数覆盖。
+
+### 构建后推送到线上（SSH）
+
+镜像只需在本地 Docker Desktop 构建一次，再经 SSH 直接传输到服务器，服务器不再重复构建：
+
+```bash
+bash scripts/redeploy.sh --ssh root@192.168.1.10
+```
+
+流程：本地 `docker build` → `docker save | gzip | ssh | docker load`（线上已有相同镜像时自动跳过传输）→ 上传部署脚本与 env 文件 → 在服务器上复用旧容器的端口/数据卷/环境变量重建容器并做健康检查，失败自动回滚。服务器只需安装 Docker 并允许 SSH 免密登录，无需项目源码。
+
+把目标写入 `deploy/remote.env`（可从 `deploy/remote.env.example` 复制，该文件已被 `.gitignore` 忽略）后，直接双击 `redeploy.cmd` 选「重新构建并部署」即可完成本地构建 + 线上发布：
+
+```ini
+SSH_HOST=root@192.168.1.10
+SSH_PORT=22
+# SSH_KEY=C:/Users/me/.ssh/id_ed25519
+# REMOTE_DIR=/tmp/kb-chatbot-deploy
+```
+
+`redeploy.cmd` 的「修改部署参数」中也可临时设置线上服务器与 SSH 端口。常用参数：`--ssh-port`、`--ssh-key`、`--remote-dir`。
+
+### 构建提速
+
+Dockerfile 拆成 `base` / `builder` / `prod-deps` 三个阶段，共享同一套镜像源与缓存：
+
+- 默认使用国内 apt/npm 源，`better-sqlite3` 直接下载 npmmirror 的 Node ABI 预编译二进制，默认**不安装** python3/make/g++；若预编译不可用，用 `--build-arg INSTALL_BUILD_TOOLS=1` 装回编译链。
+- 生产依赖由 `prod-deps` 阶段单独 `pnpm install --prod` 安装，运行镜像不含 vite/vue 等开发依赖（实测 `node_modules` 约 83MB）。
+- apt 索引、deb 包、npm 缓存、pnpm store 与 better-sqlite3 预编译包全部走 BuildKit 缓存挂载。
+
+实测（Docker Desktop，基础镜像与依赖已缓存）：全量重建约 8 秒，无改动重建 1 秒，只改前端或后端约 2 秒。首次构建仍需拉取基础镜像并下载全部依赖。
 
 Kubernetes 清单见 `deploy/k8s/kb-chatbot.yaml`（PVC + ConfigMap + Deployment + Service）。使用前替换镜像地址，并按文件头部注释创建 `kb-chatbot-llm` Secret。清单固定 `replicas: 1` + `strategy: Recreate`，因为 SQLite 只支持单写者；数据卷请使用块存储/本地盘，不要用 NFS。
 
