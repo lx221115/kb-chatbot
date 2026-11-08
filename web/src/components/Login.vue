@@ -37,7 +37,7 @@ async function submit() {
       <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
     </button>
     <div class="card">
-      <div class="logo">KB</div>
+      <img class="logo" src="/logo.svg" alt="KB Chatbot" width="44" height="44" />
       <h1>KB Chatbot</h1>
       <p class="sub">SAG2 知识库聊天机器人</p>
 
@@ -67,11 +67,7 @@ async function submit() {
 }
 .theme-toggle:hover { color: var(--primary); border-color: var(--primary); }
 .card { width: 340px; padding: 36px 32px; background: var(--bg); border-radius: 16px; box-shadow: var(--shadow-card); text-align: center; }
-.logo {
-  width: 44px; height: 44px; margin: 0 auto 10px; border-radius: 12px;
-  background: var(--primary); color: #fff; font-weight: 700; font-size: 18px;
-  display: flex; align-items: center; justify-content: center;
-}
+.logo { display: block; width: 44px; height: 44px; margin: 0 auto 10px; }
 h1 { font-size: 20px; margin: 0; color: var(--text); }
 .sub { color: var(--text-muted); font-size: 13px; margin: 6px 0 22px; }
 .tabs { display: flex; gap: 4px; background: var(--bg-input); border-radius: 10px; padding: 4px; margin-bottom: 16px; }

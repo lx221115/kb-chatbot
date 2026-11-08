@@ -120,7 +120,7 @@ function autoGrow(e) {
   <div class="chat">
     <div ref="listRef" class="msg-list">
       <div v-if="!messages.length" class="welcome">
-        <div class="w-logo">KB</div>
+        <img class="w-logo" src="/logo.svg" alt="" width="52" height="52" />
         <h2>你好，有什么可以帮你？</h2>
         <p>基于你的知识库回答（SAG2：BM25 多跳检索 + JEV 证据验证）</p>
         <div class="sugs">
@@ -129,7 +129,7 @@ function autoGrow(e) {
       </div>
 
       <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
-        <div v-if="m.role === 'assistant'" class="a-avatar">KB</div>
+        <img v-if="m.role === 'assistant'" class="a-avatar" src="/logo.svg" alt="" width="30" height="30" />
         <div class="body">
           <pre class="content">{{ m.content }}</pre>
           <details v-if="m.evidence?.length" class="evidence">
@@ -153,7 +153,7 @@ function autoGrow(e) {
         </div>
       </div>
       <div v-if="busy" class="msg assistant">
-        <div class="a-avatar">KB</div>
+        <img class="a-avatar" src="/logo.svg" alt="" width="30" height="30" />
         <div class="body typing">思考中…</div>
       </div>
     </div>
@@ -204,10 +204,7 @@ function autoGrow(e) {
 .msg-list { flex: 1; overflow-y: auto; padding: 28px 20px 12px; }
 .msg-list > * { max-width: 760px; margin: 0 auto 22px; }
 .welcome { text-align: center; padding-top: 12vh; }
-.w-logo {
-  width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 14px; background: var(--primary);
-  color: #fff; font-weight: 700; font-size: 20px; display: flex; align-items: center; justify-content: center;
-}
+.w-logo { display: block; width: 52px; height: 52px; margin: 0 auto 14px; }
 .welcome h2 { font-size: 22px; margin: 0 0 6px; font-weight: 600; color: var(--text); }
 .welcome p { color: var(--text-muted); font-size: 13.5px; margin: 0 0 22px; }
 .sugs { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
@@ -219,8 +216,7 @@ function autoGrow(e) {
 .msg { display: flex; gap: 12px; }
 .msg.user { justify-content: flex-end; }
 .a-avatar {
-  width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px; background: var(--primary); color: #fff;
-  font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 2px;
+  display: block; width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px; margin-top: 2px;
 }
 .msg .body { max-width: 82%; min-width: 0; }
 .msg.user .body {

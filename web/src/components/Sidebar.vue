@@ -14,7 +14,10 @@ function onToggleTheme() { theme.value = toggleTheme(); }
 <template>
   <aside class="sidebar">
     <div class="top">
-      <div class="brand"><span class="logo">KB</span><span>KB Chatbot</span></div>
+      <div class="brand">
+        <img class="logo" src="/logo.svg" alt="" width="26" height="26" />
+        <span>KB Chatbot</span>
+      </div>
       <button class="new-chat" @click="emit('new')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
         新会话
@@ -70,10 +73,7 @@ function onToggleTheme() { theme.value = toggleTheme(); }
 }
 .top { padding: 16px 14px 10px; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; margin-bottom: 14px; }
-.logo {
-  width: 26px; height: 26px; border-radius: 8px; background: var(--primary); color: #fff;
-  font-size: 12px; display: flex; align-items: center; justify-content: center;
-}
+.logo { width: 26px; height: 26px; flex-shrink: 0; display: block; }
 .new-chat {
   width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;
   padding: 9px 0; border: none; border-radius: 10px; background: var(--primary);
