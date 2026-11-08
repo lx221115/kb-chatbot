@@ -9,8 +9,7 @@
     "dev:server": "node --watch server/index.js",
     "dev:web": "vite web",
     "build": "vite build web",
-    "start": "cross-env NODE_ENV=production node server/index.js",
-    "mcp": "node server/mcp.js"
+    "start": "cross-env NODE_ENV=production node server/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

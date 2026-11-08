@@ -1,48 +1,55 @@
 ---
 name: kb-management
-description: Manage the KB Chatbot knowledge base (SAG2: SQLite FTS5 + BM25 + JEV) through an MCP server. Use when an agent needs to add, list, read, update, delete, or search knowledge documents, ingest text/files/web URLs, or ask the knowledge-base bot questions via kb_chat. Triggers on requests like "加入知识库 / 更新知识库 / 删除文档 / 检索知识库 / 问知识库".
+description: Manage the KB Chatbot knowledge base (SAG2: SQLite FTS5 + BM25 + JEV) through its built-in MCP endpoint. Use when an agent needs to add, list, read, update, delete, or search knowledge documents, ingest text/files/web URLs, or ask the knowledge-base bot questions via kb_chat. Triggers on requests like "加入知识库 / 更新知识库 / 删除文档 / 检索知识库 / 问知识库".
 ---
 
 # KB Chatbot 知识库管理
 
 ## Overview
 
-本 skill 让任意支持 MCP 的 agent 通过 stdio MCP 服务器操作 KB Chatbot 的知识库：文本/文件/URL 入库、列出、读取、更新、删除、BM25 检索，以及调用机器人问答（含 `/` 斜杠指令）。服务器只是 KB Chatbot REST API 的瘦封装，数据按登录用户隔离。
+本 skill 让任意支持 Streamable HTTP MCP 的 agent 直接操作 KB Chatbot 的知识库：文本/文件/URL 入库、列出、读取、更新、删除、BM25 检索，以及调用机器人问答（含 `/` 斜杠指令）。MCP 端点内置于 Chat 服务本身（`POST /api/mcp`），不需要额外启动 MCP 进程，数据按 Bearer token 对应的登录用户隔离。
 
 ## 前置条件
 
-1. KB Chatbot 后端已启动，默认监听 `http://localhost:3000`（在项目根目录执行 `pnpm dev:server` 或 `pnpm start`）。
-2. 已存在一个账号（在 Web 界面注册，或调用 `/api/auth/register`）。知识库、会话都按该账号隔离。
-3. 目标 agent 的 Node.js ≥ 18（用于运行 MCP 服务器进程）。
+1. KB Chatbot 后端已启动，默认地址 `http://localhost:3000`（项目根目录执行 `pnpm dev:server` 或 `pnpm start`）。MCP 与 Chat 是同一个进程、同一个端口。
+2. 已存在一个账号（Web 界面注册，或调用 `POST /api/auth/register`）。
+3. 持有一个有效的登录 token（见下文「获取 token」）。
 
-## MCP 服务器配置
+## 获取 token
 
-在目标 agent 的 MCP 配置（如 `.qoder/mcp.json`、`claude_desktop_config.json`、`mcpServers` 段）中加入以下条目。把 `/ABS/PATH/TO/kb-chatbot` 替换为本项目实际绝对路径。
+调用登录接口换取 token：
+
+```bash
+curl -s http://localhost:3000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"<用户名>","password":"<密码>"}'
+# => {"token":"<TOKEN>","userId":1,"username":"..."}
+```
+
+token 存在服务端 `sessions` 表（SQLite，跨重启保留），调用 `/api/auth/logout` 后失效，届时重新登录即可。
+
+## MCP 配置
+
+在目标 agent 的 MCP 配置（如 `.qoder/mcp.json`、`claude_desktop_config.json`、`mcpServers` 段）中加入：
 
 ```json
 {
   "mcpServers": {
     "kb-chatbot": {
-      "command": "node",
-      "args": ["/ABS/PATH/TO/kb-chatbot/server/mcp.js"],
-      "env": {
-        "KB_BASE_URL": "http://localhost:3000",
-        "KB_USERNAME": "tester",
-        "KB_PASSWORD": "pass123456"
+      "type": "http",
+      "url": "http://localhost:3000/api/mcp",
+      "headers": {
+        "Authorization": "Bearer <TOKEN>"
       }
     }
   }
 }
 ```
 
-Windows 路径示例：`"args": ["F:/work/kb-chatbot/server/mcp.js"]`。
-
-### 凭证二选一
-
-- **用户名密码（推荐，自动登录换 token）**：设置 `KB_USERNAME` + `KB_PASSWORD`。服务器首次调用时用 `/api/auth/login` 换取 token 并缓存于进程内。
-- **直接给 token**：设置 `KB_TOKEN`（Web 登录后 localStorage `kb_token` 的值，或 `/api/auth/login` 返回的 `token`）。设置了 `KB_TOKEN` 时优先使用它。
-
-不要把长期有效的凭证写进会被提交的仓库文件；用目标 agent 的密钥/环境配置注入。
+- 服务端无状态（不返回 `Mcp-Session-Id`），每个请求都需携带 `Authorization`，token 决定了操作哪个用户的知识库。
+- 若目标客户端把 Streamable HTTP 写作 `"transport": "streamable-http"`，按该客户端的字段名填写，`url` 与 `headers` 不变。
+- 远程部署时把 `http://localhost:3000` 换成实际地址；对外暴露请配合反向代理与 HTTPS。
+- 不要把长期有效的 token 写进会被提交的仓库文件；用目标 agent 的密钥/环境配置注入。
 
 ## 工具清单
 
@@ -78,4 +85,13 @@ Windows 路径示例：`"args": ["F:/work/kb-chatbot/server/mcp.js"]`。
 
 ## 验证
 
-在 KB Chatbot 项目根目录运行 `node scripts/test-mcp.mjs`，会以 stdio 拉起 MCP 服务器并跑完整增删改查回归（需后端在 `localhost:3000` 运行且存在 `tester/pass123456` 账号，或按需修改脚本顶部的环境变量）。
+在 KB Chatbot 项目根目录运行 `node scripts/test-mcp.mjs`，会通过 HTTP 调用 `/api/mcp` 跑完整增删改查回归（需后端在 `localhost:3000` 运行；脚本会自动注册/登录 `tester` 账号）。原始协议请求也可直接发：
+
+```bash
+curl -s http://localhost:3000/api/mcp \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-06-18' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
