@@ -57,6 +57,27 @@ pnpm build && pnpm start   # 生产模式：Express 直接托管 web/dist
 
 首次使用：打开页面 → 注册账号 → 左下角「模型设置」填写协议/Base URL/API Key/模型名 → 开始对话。
 
+## 容器化部署
+
+```bash
+docker build -t your-registry/kb-chatbot:0.1.0 .
+
+# 国内网络下 Debian/npm 源较慢时，可覆盖构建源（基础镜像仍需能访问 Docker Hub 或配置 registry-mirrors）
+docker build \
+  --build-arg DEBIAN_MIRROR=mirrors.aliyun.com \
+  --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+  -t your-registry/kb-chatbot:0.1.0 .
+
+docker run -d -p 3000:3000 \
+  -e DATA_DIR=/app/data \
+  -v kb-chatbot-data:/app/data \
+  --name kb-chatbot your-registry/kb-chatbot:0.1.0
+```
+
+SQLite 文件默认放在 `./data`，可用 `DATA_DIR` 改到挂载卷（如 `/app/data`）。**必须持久化该目录**，否则容器/Pod 重建会丢失 `kb.db`。容器以 `node`（uid 1000）运行，bind mount 宿主机目录时需保证该目录对 1000 可写。
+
+Kubernetes 清单见 `deploy/k8s/kb-chatbot.yaml`（PVC + ConfigMap + Deployment + Service）。使用前替换镜像地址，并按文件头部注释创建 `kb-chatbot-llm` Secret。清单固定 `replicas: 1` + `strategy: Recreate`，因为 SQLite 只支持单写者；数据卷请使用块存储/本地盘，不要用 NFS。
+
 ## REST API
 
 - `POST /api/auth/register|login|logout`、`GET /api/auth/me`
@@ -151,7 +172,9 @@ server/
 web/               Vue3 + Vite 前端（登录页 / 侧栏历史 / 聊天区 / 设置弹窗 / 知识库抽屉；theme.js 深色模式）
 skills/            kb-management/SKILL.md（可复制到其他 agent 的知识库管理技能）
 scripts/           test-api.mjs（知识库流程）、test-auth.mjs（鉴权/会话/设置回归）、test-mcp.mjs（MCP 全流程回归）
-data/kb.db         运行时生成的数据库（gitignore）
+deploy/k8s/        Kubernetes 清单（PVC + ConfigMap + Deployment + Service）
+Dockerfile         多阶段构建镜像，非 root 运行
+data/kb.db         运行时生成的数据库（gitignore，可用 DATA_DIR 改位置）
 logs/              运行日志 app-YYYY-MM-DD.log（gitignore）
 ```
 

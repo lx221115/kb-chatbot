@@ -1,0 +1,13 @@
+node_modules
+data
+logs
+web/dist
+.git
+.gitignore
+.env
+.env.local
+*.log
+Dockerfile
+.dockerignore
+deploy
+scripts

@@ -1,0 +1,126 @@
+# kb-chatbot 单副本部署清单（SQLite + WAL，数据挂 PVC）
+#
+# 使用前：
+#   1. 把 Deployment 里的 image 换成你的镜像地址
+#   2. 创建模型兜底密钥（未创建也能启动，用户可在「模型设置」里各自配置）：
+#      kubectl create namespace kb-chatbot
+#      kubectl -n kb-chatbot create secret generic kb-chatbot-llm --from-literal=api-key='sk-xxx'
+#   3. kubectl apply -f deploy/k8s/kb-chatbot.yaml
+#
+# 注意：SQLite 只支持单写者，必须 replicas: 1 + strategy: Recreate，
+# 且 PVC 不要使用 NFS 等共享文件系统。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kb-chatbot
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kb-chatbot-data
+  namespace: kb-chatbot
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kb-chatbot-config
+  namespace: kb-chatbot
+data:
+  PORT: "3000"
+  LOG_LEVEL: info
+  LLM_BASE_URL: https://api.deepseek.com/v1
+  LLM_MODEL: deepseek-chat
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kb-chatbot
+  namespace: kb-chatbot
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: kb-chatbot
+  template:
+    metadata:
+      labels:
+        app: kb-chatbot
+    spec:
+      # 镜像以 uid/gid 1000 的 node 用户运行；fsGroup 让挂载卷对该用户可写。
+      # 若存储不支持 fsGroup（如 hostPath），需自行 chown 卷目录为 1000:1000。
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: kb-chatbot
+          image: your-registry/kb-chatbot:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: kb-chatbot-config
+          env:
+            - name: DATA_DIR
+              value: /app/data
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kb-chatbot-llm
+                  key: api-key
+                  optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: logs
+              mountPath: /app/logs
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: kb-chatbot-data
+        # 日志按天写文件，容器内 emptyDir 即可，用 kubectl logs 采集
+        - name: logs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kb-chatbot
+  namespace: kb-chatbot
+spec:
+  type: ClusterIP
+  selector:
+    app: kb-chatbot
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
