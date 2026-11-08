@@ -2,7 +2,8 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const DATA_DIR = path.resolve('data');
+// 容器部署时通过 DATA_DIR 指向持久化卷，默认使用项目根 data/
+const DATA_DIR = path.resolve(process.env.DATA_DIR || 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 export const db = new Database(path.join(DATA_DIR, 'kb.db'));
